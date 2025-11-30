@@ -26,9 +26,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +64,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(viewModel: MainViewModel = viewModel()) {
@@ -72,6 +79,43 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
         Icons.Filled.PhotoCamera,
         Icons.Filled.Person
     )
+    
+    // Date Picker State
+    var showDatePicker by remember { mutableStateOf(false) }
+    var selectedDate by remember { mutableStateOf(System.currentTimeMillis()) }
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate)
+    
+    // Navigation State
+    var showWeightChart by remember { mutableStateOf(false) }
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let {
+                        selectedDate = it
+                    }
+                    showDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+    
+    // Show WeightChartScreen if navigated
+    if (showWeightChart) {
+        WeightChartScreen(onBack = { showWeightChart = false })
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -80,16 +124,33 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                     val titleText = when (selectedItem) {
                         0 -> "每日听力"
                         1 -> "吃了什么"
-                        2 -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                        2 -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(selectedDate))
                         else -> "吃了什么"
                     }
                     Text(titleText)
                 },
                 actions = {
                     if (selectedItem == 2) {
-                        androidx.compose.material3.IconButton(onClick = { /* TODO: Date Picker */ }) {
+                        // Weight Chart Icon
+                        androidx.compose.material3.IconButton(onClick = { /* TODO: Show weight chart */ }) {
                             Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Filled.DateRange,
+                                imageVector = Icons.Filled.ShowChart,
+                                contentDescription = "Weight Chart",
+                                tint = Color.Black
+                            )
+                        }
+                        // Blood Pressure Chart Icon
+                        androidx.compose.material3.IconButton(onClick = { showWeightChart = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = "Blood Pressure Chart",
+                                tint = Color.Black
+                            )
+                        }
+                        // Calendar Icon
+                        androidx.compose.material3.IconButton(onClick = { showDatePicker = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.DateRange,
                                 contentDescription = "Select Date",
                                 tint = Color.Black
                             )
@@ -132,7 +193,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
             when (selectedItem) {
                 0 -> HomeContent()
                 1 -> CameraContent(viewModel)
-                2 -> ProfileContent(viewModel)
+                2 -> ProfileContent(viewModel, selectedDate)
             }
         }
     }

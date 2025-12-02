@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -63,7 +64,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.core.content.ContextCompat
+import android.os.Environment
+import java.io.File
 
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.TextButton
@@ -87,6 +97,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     
     // Navigation State
     var showWeightChart by remember { mutableStateOf(false) }
+    var showBloodPressureChart by remember { mutableStateOf(false) }
 
     if (showDatePicker) {
         DatePickerDialog(
@@ -116,6 +127,12 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
         WeightChartScreen(onBack = { showWeightChart = false })
         return
     }
+    
+    // Show BloodPressureChartScreen if navigated
+    if (showBloodPressureChart) {
+        BloodPressureChartScreen(onBack = { showBloodPressureChart = false })
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -127,12 +144,21 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                         2 -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(selectedDate))
                         else -> "吃了什么"
                     }
-                    Text(titleText)
+                    Text(
+                        text = titleText,
+                        modifier = if (selectedItem == 2) {
+                            Modifier.pointerInput(Unit) {
+                                detectTapGestures(onTap = { showDatePicker = true })
+                            }
+                        } else {
+                            Modifier
+                        }
+                    )
                 },
                 actions = {
                     if (selectedItem == 2) {
                         // Weight Chart Icon
-                        androidx.compose.material3.IconButton(onClick = { /* TODO: Show weight chart */ }) {
+                        androidx.compose.material3.IconButton(onClick = { showWeightChart = true }) {
                             Icon(
                                 imageVector = Icons.Filled.ShowChart,
                                 contentDescription = "Weight Chart",
@@ -140,18 +166,10 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                             )
                         }
                         // Blood Pressure Chart Icon
-                        androidx.compose.material3.IconButton(onClick = { showWeightChart = true }) {
+                        androidx.compose.material3.IconButton(onClick = { showBloodPressureChart = true }) {
                             Icon(
                                 imageVector = Icons.Filled.Favorite,
                                 contentDescription = "Blood Pressure Chart",
-                                tint = Color.Black
-                            )
-                        }
-                        // Calendar Icon
-                        androidx.compose.material3.IconButton(onClick = { showDatePicker = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.DateRange,
-                                contentDescription = "Select Date",
                                 tint = Color.Black
                             )
                         }
@@ -202,6 +220,8 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
 @Composable
 fun CameraContent(viewModel: MainViewModel) {
     var isPhotoCaptured by remember { mutableStateOf(false) }
+    var capturedPhotoPath by remember { mutableStateOf<String?>(null) }
+    val imageCapture = remember { ImageCapture.Builder().build() }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -255,7 +275,8 @@ fun CameraContent(viewModel: MainViewModel) {
                 .offset(x = previewX, y = previewY)
                 .size(width = previewWidth, height = previewHeight)
                 .clip(androidx.compose.foundation.shape.RoundedCornerShape(previewCornerRadius))
-                .background(Color.Black)
+                .background(Color.Black),
+            imageCapture = imageCapture
         )
 
         // Bottom Controls (Visible when NOT captured)
@@ -270,7 +291,30 @@ fun CameraContent(viewModel: MainViewModel) {
                     .height(maxHeight - initialPreviewHeight)
             ) {
                 Button(
-                    onClick = { isPhotoCaptured = true },
+                    onClick = {
+                        val photoFile = File(
+                            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
+                            SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
+                                .format(System.currentTimeMillis()) + ".jpg"
+                        )
+
+                        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
+                        imageCapture.takePicture(
+                            outputOptions,
+                            ContextCompat.getMainExecutor(context),
+                            object : ImageCapture.OnImageSavedCallback {
+                                override fun onError(exc: ImageCaptureException) {
+                                    android.util.Log.e("CameraContent", "Photo capture failed: ${exc.message}", exc)
+                                }
+
+                                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                    capturedPhotoPath = photoFile.absolutePath
+                                    isPhotoCaptured = true
+                                }
+                            }
+                        )
+                    },
                     modifier = Modifier
                         .size(80.dp)
                         .align(Alignment.Center)
@@ -394,17 +438,19 @@ fun CameraContent(viewModel: MainViewModel) {
                                         } else {
                                             // Check if dragged far enough to the right (Snack)
                                             if (offsetX.value > 200f) {
-                                                viewModel.addEvent("Snack")
-                                                android.widget.Toast.makeText(context, "Snack recorded", android.widget.Toast.LENGTH_SHORT).show()
+                                                viewModel.addEvent("Snack", capturedPhotoPath)
+                                                android.widget.Toast.makeText(context, "已记录零食", android.widget.Toast.LENGTH_SHORT).show()
                                                 isPhotoCaptured = false 
+                                                capturedPhotoPath = null
                                                 offsetX.snapTo(0f)
                                                 offsetY.snapTo(0f)
                                             }
                                             // Check if dragged far enough to the left (Main Meal)
                                             else if (offsetX.value < -200f) {
-                                                viewModel.addEvent("Main Meal")
-                                                android.widget.Toast.makeText(context, "Main Meal recorded", android.widget.Toast.LENGTH_SHORT).show()
+                                                viewModel.addEvent("Main Meal", capturedPhotoPath)
+                                                android.widget.Toast.makeText(context, "已记录正餐", android.widget.Toast.LENGTH_SHORT).show()
                                                 isPhotoCaptured = false
+                                                capturedPhotoPath = null
                                                 offsetX.snapTo(0f)
                                                 offsetY.snapTo(0f)
                                             } else {
@@ -430,9 +476,24 @@ fun CameraContent(viewModel: MainViewModel) {
                         containerColor = Color.White,
                         contentColor = Color.Black
                     ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     border = BorderStroke(2.dp, Color.Black)
                 ) {
-                    // Empty content
+                    if (capturedPhotoPath != null) {
+                        val bitmap = remember(capturedPhotoPath) {
+                            com.example.eat.utils.ImageUtils.loadRotatedBitmap(capturedPhotoPath!!)
+                        }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Captured Photo",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
                 }
             }
         }

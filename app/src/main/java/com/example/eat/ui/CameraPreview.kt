@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -32,7 +33,8 @@ import kotlin.coroutines.suspendCoroutine
 @Composable
 fun CameraPreview(
     modifier: Modifier = Modifier,
-    cameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    cameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA,
+    imageCapture: ImageCapture? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -61,12 +63,9 @@ fun CameraPreview(
     if (hasCameraPermission) {
         val previewView = remember { PreviewView(context) }
 
-        LaunchedEffect(cameraSelector, lifecycleOwner) {
+        LaunchedEffect(cameraSelector, lifecycleOwner, imageCapture) {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-            val cameraProvider = cameraProviderFuture.get() // This is blocking, but acceptable in LaunchedEffect(Dispatchers.Main) for this API usually, or better use suspendCoroutine if needed. However, ProcessCameraProvider.getInstance returns a ListenableFuture.
-            // Ideally we should use a suspend function to await the future.
-            // But for simplicity and matching previous logic, we can use the listener approach inside a suspendCoroutine or just run it.
-            // Actually, inside LaunchedEffect we are in a coroutine.
+            val cameraProvider = cameraProviderFuture.get()
             
             try {
                 // Unbind previous use cases
@@ -75,11 +74,20 @@ fun CameraPreview(
                 val preview = Preview.Builder().build()
                 preview.setSurfaceProvider(previewView.surfaceProvider)
 
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector,
-                    preview
-                )
+                if (imageCapture != null) {
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        preview,
+                        imageCapture
+                    )
+                } else {
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        preview
+                    )
+                }
             } catch (exc: Exception) {
                 Log.e("CameraPreview", "Use case binding failed", exc)
             }

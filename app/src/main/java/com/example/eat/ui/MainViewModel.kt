@@ -120,4 +120,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             healthDao.deleteAllHealthData()
         }
     }
+
+    fun deleteEvent(event: Event) {
+        viewModelScope.launch {
+            // 1. Delete from Database
+            eventDao.deleteEvents(event.timestamps)
+
+            // 2. Delete associated images from storage
+            event.imagePaths.forEach { path ->
+                try {
+                    val file = java.io.File(path)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
 }

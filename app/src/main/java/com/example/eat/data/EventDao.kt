@@ -15,4 +15,7 @@ interface EventDao {
 
     @Query("DELETE FROM events")
     suspend fun deleteAllEvents()
+
+    @Query("DELETE FROM events WHERE timestamp IN (:timestamps)")
+    suspend fun deleteEvents(timestamps: List<Long>)
 }

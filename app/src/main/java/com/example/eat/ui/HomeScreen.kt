@@ -432,7 +432,19 @@ fun CameraContent(viewModel: MainViewModel) {
                                     scope.launch {
                                         // Check for vertical drag to reset
                                         if (kotlin.math.abs(offsetY.value) > resetThresholdPx) {
+                                            // Delete the captured photo if it exists
+                                            capturedPhotoPath?.let { path ->
+                                                try {
+                                                    val file = File(path)
+                                                    if (file.exists()) {
+                                                        file.delete()
+                                                    }
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                            }
                                             isPhotoCaptured = false
+                                            capturedPhotoPath = null
                                             offsetX.snapTo(0f)
                                             offsetY.snapTo(0f)
                                         } else {

@@ -1,5 +1,11 @@
 package com.example.eat.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateValue
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -13,6 +19,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,17 +31,20 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -45,6 +55,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,7 +64,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -66,6 +82,7 @@ import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 // Data class to hold cached layout calculations
 private data class LayoutData(
@@ -574,6 +591,7 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
         )
     }
 
+
     if (showEventDetail && selectedEvent != null) {
         AlertDialog(
             onDismissRequest = { showEventDetail = false },
@@ -593,29 +611,77 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                         
                         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth()) { page ->
                             val path = selectedEvent!!.imagePaths[page]
-                            val bitmap = remember(path) { com.example.eat.utils.ImageUtils.loadRotatedBitmap(path) }
-                            if (bitmap != null) {
-                                Image(
-                                    bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                            
+                            // Load image asynchronously to avoid blocking the main thread
+                            val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, key1 = path) {
+                                value = withContext(Dispatchers.IO) {
+                                    com.example.eat.utils.ImageUtils.loadRotatedBitmap(path)
+                                }
+                            }
+
+                            // Fixed-size placeholder box with 3:4 aspect ratio
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(3f / 4f) // Width:Height = 3:4
+                                    .background(Color(0xFFF5F5F5)) // Light gray placeholder
+                            ) {
+                                // Display image with fade-in animation when loaded
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = bitmap != null,
+                                    enter = androidx.compose.animation.fadeIn(
+                                        animationSpec = tween(durationMillis = 300)
+                                    ),
+                                    exit = androidx.compose.animation.fadeOut(
+                                        animationSpec = tween(durationMillis = 300)
+                                    )
+                                ) {
+                                    Image(
+                                        bitmap = bitmap!!.asImageBitmap(),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                
+                                // Delete button (always visible)
+                                IconButton(
+                                    onClick = {
+                                        viewModel.deleteEvent(selectedEvent!!)
+                                        showEventDetail = false
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(20.dp)
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.7f))
+                                        .border(1.dp, Color.Black, CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Delete",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                             }
                         }
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            repeat(selectedEvent!!.imagePaths.size) { iteration ->
-                                val color = if (pagerState.currentPage == iteration) Color.DarkGray else Color.LightGray
-                                Box(
-                                    modifier = Modifier
-                                        .padding(2.dp)
-                                        .clip(CircleShape)
-                                        .background(color)
-                                        .size(8.dp)
-                                )
+                        if (selectedEvent!!.imagePaths.size > 1) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                repeat(selectedEvent!!.imagePaths.size) { iteration ->
+                                    val color = if (pagerState.currentPage == iteration) Color.DarkGray else Color.LightGray
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(2.dp)
+                                            .clip(CircleShape)
+                                            .background(color)
+                                            .size(8.dp)
+                                    )
+                                }
                             }
                         }
                     } else {

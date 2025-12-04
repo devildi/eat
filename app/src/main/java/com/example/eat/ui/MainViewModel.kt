@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.eat.data.AppDatabase
 import com.example.eat.data.EventEntity
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -139,4 +140,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    fun deleteEventByImagePath(imagePath: String) {
+        viewModelScope.launch {
+            // 1. Delete from Database
+            eventDao.deleteEventByImagePath(imagePath)
+
+            // 2. Delete image from storage
+            try {
+                val file = java.io.File(imagePath)
+                if (file.exists()) {
+                    file.delete()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun getEventsByDate(dateMillis: Long): Flow<List<Event>> {
+        // Calculate start and end of the selected day
+        val calendar = java.util.Calendar.getInstance()
+        calendar.timeInMillis = dateMillis
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfDay = calendar.timeInMillis
+        
+        calendar.add(java.util.Calendar.DAY_OF_MONTH, 1)
+        val endOfDay = calendar.timeInMillis
+        
+        return eventDao.getEventsByDateRange(startOfDay, endOfDay)
+            .map { entities ->
+                // Group entities into UI Events (merged by 10 mins)
+                val groupedEvents = mutableListOf<Event>()
+                
+                entities.forEach { entity ->
+                    val lastEvent = groupedEvents.lastOrNull { it.type == entity.type }
+                    val shouldMerge = if (lastEvent != null) {
+                        val timeDiffMinutes = (entity.timestamp - lastEvent.latestTimestamp) / (60 * 1000)
+                        timeDiffMinutes < 10
+                    } else {
+                        false
+                    }
+
+                    if (shouldMerge && lastEvent != null) {
+                        val index = groupedEvents.indexOf(lastEvent)
+                        val newImagePaths = if (entity.imagePath != null) {
+                            lastEvent.imagePaths + entity.imagePath
+                        } else {
+                            lastEvent.imagePaths
+                        }
+                        
+                        val newColorIndex = (0..2).random()
+
+                        groupedEvents[index] = lastEvent.copy(
+                            timestamps = lastEvent.timestamps + entity.timestamp,
+                            colorIndices = lastEvent.colorIndices + newColorIndex,
+                            imagePaths = newImagePaths
+                        )
+                    } else {
+                        val initialImagePaths = if (entity.imagePath != null) listOf(entity.imagePath) else emptyList()
+                        val newColorIndex = (0..2).random()
+                        groupedEvents.add(Event(entity.type, listOf(entity.timestamp), listOf(newColorIndex), initialImagePaths))
+                    }
+                }
+                groupedEvents
+            }
+    }
+
+
 }

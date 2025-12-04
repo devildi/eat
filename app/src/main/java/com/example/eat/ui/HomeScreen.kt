@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Favorite
@@ -93,7 +94,14 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     // Date Picker State
     var showDatePicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(System.currentTimeMillis()) }
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate)
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = selectedDate,
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                return utcTimeMillis <= System.currentTimeMillis()
+            }
+        }
+    )
     
     // Navigation State
     var showWeightChart by remember { mutableStateOf(false) }
@@ -220,10 +228,28 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
 @Composable
 fun CameraContent(viewModel: MainViewModel) {
     var isPhotoCaptured by remember { mutableStateOf(false) }
+    var isTakingPhoto by remember { mutableStateOf(false) }
     var capturedPhotoPath by remember { mutableStateOf<String?>(null) }
     val imageCapture = remember { ImageCapture.Builder().build() }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val context = androidx.compose.ui.platform.LocalContext.current
+    
+    // Cleanup: Delete photo when component is disposed (user navigates away)
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            // If there's a captured photo that hasn't been saved, delete it
+            if (isPhotoCaptured && capturedPhotoPath != null) {
+                try {
+                    val file = File(capturedPhotoPath!!)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val maxWidth = maxWidth
@@ -290,30 +316,54 @@ fun CameraContent(viewModel: MainViewModel) {
                     .fillMaxWidth()
                     .height(maxHeight - initialPreviewHeight)
             ) {
+                if (isTakingPhoto) {
+                    val buttonSize = 80.dp
+                    val bottomBarHeight = maxHeight - initialPreviewHeight
+                    val gapHeight = (bottomBarHeight - buttonSize) / 2
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(gapHeight)
+                            .align(Alignment.TopCenter),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "正在拍照中",
+                            color = Color.Black,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
                 Button(
                     onClick = {
-                        val photoFile = File(
-                            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
-                            SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
-                                .format(System.currentTimeMillis()) + ".jpg"
-                        )
+                        if (!isTakingPhoto) {
+                            isTakingPhoto = true
+                            val photoFile = File(
+                                context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
+                                SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
+                                    .format(System.currentTimeMillis()) + ".jpg"
+                            )
 
-                        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+                            val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
-                        imageCapture.takePicture(
-                            outputOptions,
-                            ContextCompat.getMainExecutor(context),
-                            object : ImageCapture.OnImageSavedCallback {
-                                override fun onError(exc: ImageCaptureException) {
-                                    android.util.Log.e("CameraContent", "Photo capture failed: ${exc.message}", exc)
+                            imageCapture.takePicture(
+                                outputOptions,
+                                ContextCompat.getMainExecutor(context),
+                                object : ImageCapture.OnImageSavedCallback {
+                                    override fun onError(exc: ImageCaptureException) {
+                                        android.util.Log.e("CameraContent", "Photo capture failed: ${exc.message}", exc)
+                                        isTakingPhoto = false
+                                    }
+
+                                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                        capturedPhotoPath = photoFile.absolutePath
+                                        isPhotoCaptured = true
+                                        isTakingPhoto = false
+                                    }
                                 }
-
-                                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                                    capturedPhotoPath = photoFile.absolutePath
-                                    isPhotoCaptured = true
-                                }
-                            }
-                        )
+                            )
+                        }
                     },
                     modifier = Modifier
                         .size(80.dp)
@@ -481,6 +531,7 @@ fun CameraContent(viewModel: MainViewModel) {
                                 }
                             )
                         }
+                        .rotate(offsetX.value / 2f)
                         .size(80.dp)
                         .border(2.dp, Color.Black, CircleShape),
                     shape = CircleShape,

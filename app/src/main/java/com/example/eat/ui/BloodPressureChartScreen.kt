@@ -2,6 +2,7 @@ package com.example.eat.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Column
@@ -103,10 +104,54 @@ fun BloodPressureChartScreen(
             )
         }
     ) { paddingValues ->
+        var dragOffset by remember { mutableStateOf(0f) }
+        var isProcessingSwipe by remember { mutableStateOf(false) }
+        val context = androidx.compose.ui.platform.LocalContext.current
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = {
+                            dragOffset = 0f
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragOffset += dragAmount.y
+                        },
+                        onDragEnd = {
+                            if (!isProcessingSwipe && kotlin.math.abs(dragOffset) > 100f) {
+                                isProcessingSwipe = true
+                                
+                                if (dragOffset < 0) {
+                                    // Swipe up - next month
+                                    val nextMonth = currentDate.clone() as Calendar
+                                    nextMonth.add(Calendar.MONTH, 1)
+                                    
+                                    // Check if next month is in the future
+                                    val now = Calendar.getInstance()
+                                    if (nextMonth.get(Calendar.YEAR) < now.get(Calendar.YEAR) ||
+                                        (nextMonth.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
+                                         nextMonth.get(Calendar.MONTH) <= now.get(Calendar.MONTH))) {
+                                        currentDate = nextMonth
+                                    } else {
+                                        android.widget.Toast.makeText(context, "不能查看未来月份", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    // Swipe down - previous month
+                                    val prevMonth = currentDate.clone() as Calendar
+                                    prevMonth.add(Calendar.MONTH, -1)
+                                    currentDate = prevMonth
+                                }
+                                
+                                isProcessingSwipe = false
+                            }
+                            dragOffset = 0f
+                        }
+                    )
+                }
         ) {
             if (highBpData.isEmpty() && lowBpData.isEmpty()) {
                 Box(

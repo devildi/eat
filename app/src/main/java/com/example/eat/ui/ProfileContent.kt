@@ -100,9 +100,19 @@ private data class LayoutData(
 fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
     val scrollState = rememberScrollState()
     val textMeasurer = rememberTextMeasurer()
+    val context = LocalContext.current
 
-    // Collect events from ViewModel
-    val events by viewModel.events.collectAsState()
+    // Collect events from ViewModel based on selected date
+    val events by viewModel.getEventsByDate(selectedDate).collectAsState(initial = null)
+    
+    // Show toast when date changes and there's no data
+    androidx.compose.runtime.LaunchedEffect(selectedDate) {
+        // Wait a bit for the data to load
+        kotlinx.coroutines.delay(100)
+        if (events != null && events!!.isEmpty()) {
+            android.widget.Toast.makeText(context, "当日无数据", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Health Data Dialog State
     var showHealthDialog by remember { mutableStateOf(false) }
@@ -110,6 +120,8 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
     var lowPressure by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("") }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var imagePathToDelete by remember { mutableStateOf<String?>(null) }
+    var showClearAllDialog by remember { mutableStateOf(false) }
 
     // Hero Animation State
     var selectedEvent by remember { mutableStateOf<Event?>(null) }
@@ -248,7 +260,7 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                     .clip(CircleShape)
                     .combinedClickable(
                         onClick = { showHealthDialog = true },
-                        onLongClick = { showDeleteDialog = true }
+                        onLongClick = { showClearAllDialog = true }
                     ),
                 color = Color.Black,
                 contentColor = Color.White,
@@ -434,7 +446,6 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                         .width(availableWidthDp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = if (isMainMeal) Arrangement.End else Arrangement.Start
                     ) {
@@ -450,10 +461,17 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (isMainMeal) {
+                                    val displayText = if (numItems >= 4) {
+                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
+                                    } else {
+                                        "正餐 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
+                                    }
                                     Text(
-                                        text = "正餐 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}",
+                                        text = displayText,
                                         style = TextStyle(fontSize = 14.sp, color = Color.Gray),
-                                        modifier = Modifier.padding(end = 8.dp)
+                                        modifier = Modifier.padding(end = 8.dp),
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                                 Box(modifier = Modifier.size(width = circlesWidthDp, height = circleDiameterDp)) {
@@ -493,10 +511,17 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                                     }
                                 }
                                 if (!isMainMeal) {
+                                    val displayText = if (numItems >= 4) {
+                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
+                                    } else {
+                                        "零食 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
+                                    }
                                     Text(
-                                        text = "零食 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}",
+                                        text = displayText,
                                         style = TextStyle(fontSize = 14.sp, color = Color.Gray),
-                                        modifier = Modifier.padding(start = 8.dp)
+                                        modifier = Modifier.padding(start = 8.dp),
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -568,29 +593,30 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
         )
     }
 
-    if (showDeleteDialog) {
+    if (showClearAllDialog) {
         AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
+            onDismissRequest = { showClearAllDialog = false },
             title = { Text("删除所有数据") },
             text = { Text("确定要删除所有事件和健康数据吗？此操作无法撤销。") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deleteAllData()
-                        showDeleteDialog = false
+                        showClearAllDialog = false
                     }
                 ) {
                     Text("删除", color = Color.Red)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
+                TextButton(onClick = { showClearAllDialog = false }) {
                     Text("取消")
                 }
             }
         )
     }
 
+    // Delete Confirmation Dialog
 
     if (showEventDetail && selectedEvent != null) {
         AlertDialog(
@@ -647,8 +673,8 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                                 // Delete button (always visible)
                                 IconButton(
                                     onClick = {
-                                        viewModel.deleteEvent(selectedEvent!!)
-                                        showEventDetail = false
+                                        imagePathToDelete = path
+                                        showDeleteDialog = true
                                     },
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
@@ -691,9 +717,35 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                     }
                 }
             },
+            confirmButton = { }
+        )
+    }
+
+    // Delete Confirmation Dialog (Rendered last to appear on top)
+    if (showDeleteDialog && selectedEvent != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("确认删除") },
+            text = { Text("确定要删除这条记录吗？") },
             confirmButton = {
-                TextButton(onClick = { showEventDetail = false }) {
-                    Text("关闭")
+                TextButton(
+                    onClick = {
+                        if (imagePathToDelete != null) {
+                            viewModel.deleteEventByImagePath(imagePathToDelete!!)
+                        } else {
+                            viewModel.deleteEvent(selectedEvent!!)
+                        }
+                        imagePathToDelete = null
+                        showDeleteDialog = false
+                        showEventDetail = false
+                    }
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("取消")
                 }
             }
         )

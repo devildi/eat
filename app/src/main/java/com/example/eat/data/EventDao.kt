@@ -18,4 +18,10 @@ interface EventDao {
 
     @Query("DELETE FROM events WHERE timestamp IN (:timestamps)")
     suspend fun deleteEvents(timestamps: List<Long>)
+
+    @Query("DELETE FROM events WHERE imagePath = :imagePath")
+    suspend fun deleteEventByImagePath(imagePath: String)
+
+    @Query("SELECT * FROM events WHERE timestamp >= :startTime AND timestamp < :endTime ORDER BY timestamp ASC")
+    fun getEventsByDateRange(startTime: Long, endTime: Long): Flow<List<EventEntity>>
 }

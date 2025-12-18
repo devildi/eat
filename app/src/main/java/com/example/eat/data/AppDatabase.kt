@@ -5,10 +5,11 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [EventEntity::class, HealthDataEntity::class], version = 2)
+@Database(entities = [EventEntity::class, HealthDataEntity::class, ArticleEntity::class], version = 3)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
     abstract fun healthDao(): HealthDao
+    abstract fun articleDao(): ArticleDao
 
     companion object {
         @Volatile

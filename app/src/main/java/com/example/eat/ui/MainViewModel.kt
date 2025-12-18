@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 
 data class Event(
     val type: String,
@@ -28,6 +31,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
     private val eventDao = database.eventDao()
     private val healthDao = database.healthDao()
+    private val articleDao = database.articleDao()
+    
+    val articleUiState: StateFlow<ArticleUiState> = articleDao.getAllArticles()
+        .map { ArticleUiState.Success(it) }
+        .stateIn(viewModelScope, SharingStarted.Lazily, ArticleUiState.Loading)
+
 
     val events: StateFlow<List<Event>?> = eventDao.getAllEvents()
         .map { entities ->
@@ -114,6 +123,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             healthDao.insertHealthData(healthData)
         }
     }
+
+    fun parseArticle(url: String, onSuccess: (String, String) -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val doc = org.jsoup.Jsoup.connect(url)
+                    .userAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                    .timeout(10000)
+                    .get()
+
+                var title = doc.title()
+                if (title.isEmpty()) {
+                    title = doc.select("h1").text()
+                }
+                if (title.isEmpty()) {
+                    title = "未命名文章"
+                }
+                
+                // Content extraction strategy
+                // 1. Try generic "article" tag
+                // 2. Try common class names
+                // 3. Fallback to all paragraphs
+                var content = doc.select("div#js_content").text() // WeChat specific
+                if (content.isEmpty()) {
+                     content = doc.select("article").text()
+                }
+                if (content.isEmpty()) {
+                    content = doc.select("div.content").text()
+                }
+                if (content.isEmpty()) {
+                    content = doc.select("p").eachText().joinToString("\n\n")
+                }
+                if (content.isEmpty()) {
+                    content = doc.body().text() // Ultimate fallback
+                }
+
+                withContext(Dispatchers.Main) {
+                    onSuccess(title, content)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    // On error, let user edit manually (empty fields)
+                    onSuccess("获取失败", "")
+                }
+            }
+        }
+    }
+
+    fun saveArticle(title: String, content: String, url: String) {
+        viewModelScope.launch {
+            val article = com.example.eat.data.ArticleEntity(
+                title = title,
+                content = content,
+                url = url,
+                timestamp = System.currentTimeMillis()
+            )
+            articleDao.insertArticle(article)
+        }
+    }
+
+    fun deleteArticle(article: com.example.eat.data.ArticleEntity) {
+        viewModelScope.launch {
+            articleDao.deleteArticle(article)
+        }
+    }
+
 
     fun deleteAllData() {
         viewModelScope.launch {
@@ -211,4 +286,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
+}
+
+sealed interface ArticleUiState {
+    data object Loading : ArticleUiState
+    data class Success(val articles: List<com.example.eat.data.ArticleEntity>) : ArticleUiState
 }

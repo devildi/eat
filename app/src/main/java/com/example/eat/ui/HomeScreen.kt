@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -84,7 +85,7 @@ import androidx.compose.material3.rememberDatePickerState
 @Composable
 fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     var selectedItem by remember { mutableIntStateOf(1) } // Default to Camera (index 1)
-    val items = listOf("首页", "相机", "我的")
+    val items = listOf("阅读", "相机", "我的")
     val icons = listOf(
         Icons.Filled.Home,
         Icons.Filled.PhotoCamera,
@@ -106,6 +107,167 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     // Navigation State
     var showWeightChart by remember { mutableStateOf(false) }
     var showBloodPressureChart by remember { mutableStateOf(false) }
+    
+    // Article Dialog State
+    var showAddArticleDialog by remember { mutableStateOf(false) }
+    var articleUrl by remember { mutableStateOf("") }
+    
+    // Detail View State
+    var selectedArticle by remember { mutableStateOf<com.example.eat.data.ArticleEntity?>(null) }
+    
+    // Deletion State
+    var articleToDelete by remember { mutableStateOf<com.example.eat.data.ArticleEntity?>(null) }
+    
+    // Parsing & Editing State
+    var isParsing by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editTitle by remember { mutableStateOf("") }
+    var editContent by remember { mutableStateOf("") }
+
+    var context = androidx.compose.ui.platform.LocalContext.current
+
+    // Loading Indicator
+    if (isParsing) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = {}) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(100.dp)
+                    .background(Color.White, shape = RoundedCornerShape(8.dp))
+            ) {
+                androidx.compose.material3.CircularProgressIndicator()
+            }
+        }
+    }
+
+    // Editing Screen
+    if (isEditing) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White)
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "编辑文章",
+                fontSize = 20.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                color = Color.Black,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            androidx.compose.material3.OutlinedTextField(
+                value = editTitle,
+                onValueChange = { editTitle = it },
+                label = { Text("标题") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+
+            androidx.compose.material3.OutlinedTextField(
+                value = editContent,
+                onValueChange = { editContent = it },
+                label = { Text("正文") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f), // Takes up remaining space
+                minLines = 5
+            )
+
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = {
+                    viewModel.saveArticle(editTitle, editContent, articleUrl)
+                    isEditing = false
+                    articleUrl = ""
+                    editTitle = ""
+                    editContent = ""
+                    android.widget.Toast.makeText(context, "已保存", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("保存")
+            }
+            
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
+             
+            TextButton(
+                onClick = { isEditing = false },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("取消")
+            }
+        }
+        return
+    }
+
+    if (showAddArticleDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAddArticleDialog = false },
+            title = { Text("添加文章") },
+            text = {
+                androidx.compose.material3.TextField(
+                    value = articleUrl,
+                    onValueChange = { articleUrl = it },
+                    label = { Text("文章链接") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (articleUrl.isNotEmpty()) {
+                        showAddArticleDialog = false
+                        isParsing = true
+                        viewModel.parseArticle(
+                            url = articleUrl,
+                            onSuccess = { title, content ->
+                                isParsing = false
+                                isEditing = true
+                                editTitle = title
+                                editContent = content
+                            },
+                            onError = { error ->
+                                isParsing = false
+                                android.widget.Toast.makeText(context, "Error: $error", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }) {
+                    Text("添加")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddArticleDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (articleToDelete != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { articleToDelete = null },
+            title = { Text("删除文章") },
+            text = { Text("确定要删除吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    articleToDelete?.let { article ->
+                        viewModel.deleteArticle(article)
+                    }
+                    articleToDelete = null
+                }) {
+                    Text("删除", color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { articleToDelete = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 
     if (showDatePicker) {
         DatePickerDialog(
@@ -135,6 +297,15 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
         WeightChartScreen(onBack = { showWeightChart = false })
         return
     }
+
+    // Show Detail Screen if selected
+    if (selectedArticle != null) {
+        ArticleDetailScreen(
+            article = selectedArticle!!,
+            onBack = { selectedArticle = null }
+        )
+        return
+    }
     
     // Show BloodPressureChartScreen if navigated
     if (showBloodPressureChart) {
@@ -147,7 +318,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
             TopAppBar(
                 title = {
                     val titleText = when (selectedItem) {
-                        0 -> "每日听力"
+                        0 -> "每日阅读"
                         1 -> "吃了什么"
                         2 -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(selectedDate))
                         else -> "吃了什么"
@@ -164,6 +335,16 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                     )
                 },
                 actions = {
+                    if (selectedItem == 0) {
+                        androidx.compose.material3.IconButton(onClick = { showAddArticleDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Add,
+                                contentDescription = "Add",
+                                tint = Color.Black
+                            )
+                        }
+                    }
+
                     if (selectedItem == 2) {
                         // Weight Chart Icon
                         androidx.compose.material3.IconButton(onClick = { showWeightChart = true }) {
@@ -217,7 +398,11 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                 .padding(innerPadding)
         ) {
             when (selectedItem) {
-                0 -> HomeContent()
+                0 -> HomeContent(
+                    viewModel, 
+                    onArticleClick = { selectedArticle = it },
+                    onArticleLongClick = { articleToDelete = it }
+                )
                 1 -> CameraContent(viewModel)
                 2 -> ProfileContent(viewModel, selectedDate)
             }

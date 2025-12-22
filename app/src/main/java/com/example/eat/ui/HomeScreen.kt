@@ -10,7 +10,10 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,7 +37,11 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -54,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Color
@@ -62,6 +70,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -80,14 +90,16 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
+import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(viewModel: MainViewModel = viewModel()) {
-    var selectedItem by remember { mutableIntStateOf(1) } // Default to Camera (index 1)
-    val items = listOf("阅读", "相机", "我的")
+    var selectedItem by remember { mutableIntStateOf(2) } // Default to Camera (index 2)
+    val items = listOf("阅读", "听力", "相机", "我的")
     val icons = listOf(
         Icons.Filled.Home,
+        Icons.Filled.Headphones, // Replaced PhotoCamera -> Headphones for Listening could use Headset or PlayArrow if Headphones not available
         Icons.Filled.PhotoCamera,
         Icons.Filled.Person
     )
@@ -107,6 +119,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     // Navigation State
     var showWeightChart by remember { mutableStateOf(false) }
     var showBloodPressureChart by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     
     // Article Dialog State
     var showAddArticleDialog by remember { mutableStateOf(false) }
@@ -125,6 +138,9 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     var editContent by remember { mutableStateOf("") }
 
     var context = androidx.compose.ui.platform.LocalContext.current
+    val playbackPosition by viewModel.currentPlaybackPosition.collectAsState()
+    val isCalibrated by viewModel.isCalibrated.collectAsState()
+    val todayArticleCount by viewModel.todayArticleCount.collectAsState()
 
     // Loading Indicator
     if (isParsing) {
@@ -179,12 +195,18 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
 
             Button(
                 onClick = {
-                    viewModel.saveArticle(editTitle, editContent, articleUrl)
-                    isEditing = false
-                    articleUrl = ""
-                    editTitle = ""
-                    editContent = ""
-                    android.widget.Toast.makeText(context, "已保存", android.widget.Toast.LENGTH_SHORT).show()
+                    scope.launch {
+                        if (viewModel.isArticleExists(editTitle)) {
+                            android.widget.Toast.makeText(context, "文章已存在", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            viewModel.saveArticle(editTitle, editContent, articleUrl)
+                            isEditing = false
+                            articleUrl = ""
+                            editTitle = ""
+                            editContent = ""
+                            android.widget.Toast.makeText(context, "已保存", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -319,13 +341,14 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                 title = {
                     val titleText = when (selectedItem) {
                         0 -> "每日阅读"
-                        1 -> "吃了什么"
-                        2 -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(selectedDate))
+                        1 -> "每日听力"
+                        2 -> "吃了什么"
+                        3 -> SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(selectedDate))
                         else -> "吃了什么"
                     }
                     Text(
                         text = titleText,
-                        modifier = if (selectedItem == 2) {
+                        modifier = if (selectedItem == 3) {
                             Modifier.pointerInput(Unit) {
                                 detectTapGestures(onTap = { showDatePicker = true })
                             }
@@ -336,16 +359,29 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                 },
                 actions = {
                     if (selectedItem == 0) {
-                        androidx.compose.material3.IconButton(onClick = { showAddArticleDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.Add,
-                                contentDescription = "Add",
-                                tint = Color.Black
+                        Text(
+                            text = "今日已读${todayArticleCount}篇",
+                            color = Color.Black,
+                            modifier = Modifier.padding(end = 16.dp)
+                        )
+                    }
+
+
+                    if (selectedItem == 1) {
+                         androidx.compose.material3.TextButton(
+                            onClick = {
+                                viewModel.syncTranscript(playbackPosition)
+                                android.widget.Toast.makeText(context, "已校准起始点", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                contentColor = Color.Black
                             )
+                        ) {
+                            Text(if (isCalibrated) "已校准" else "校准")
                         }
                     }
 
-                    if (selectedItem == 2) {
+                    if (selectedItem == 3) {
                         // Weight Chart Icon
                         androidx.compose.material3.IconButton(onClick = { showWeightChart = true }) {
                             Icon(
@@ -369,6 +405,17 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                     titleContentColor = Color.Black
                 )
             )
+        },
+        floatingActionButton = {
+            if (selectedItem == 0) {
+                androidx.compose.material3.FloatingActionButton(
+                    onClick = { showAddArticleDialog = true },
+                    containerColor = Color.Black,
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add")
+                }
+            }
         },
         bottomBar = {
             NavigationBar(
@@ -403,8 +450,324 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                     onArticleClick = { selectedArticle = it },
                     onArticleLongClick = { articleToDelete = it }
                 )
-                1 -> CameraContent(viewModel)
-                2 -> ProfileContent(viewModel, selectedDate)
+                1 -> ListeningContent(viewModel)
+                2 -> CameraContent(viewModel)
+                3 -> ProfileContent(
+                    viewModel, 
+                    selectedDate,
+                    onDateChange = { newDate ->
+                        if (newDate <= System.currentTimeMillis()) {
+                            selectedDate = newDate
+                        } else {
+                            android.widget.Toast.makeText(context, "无法查看未来日期", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ListeningContent(viewModel: MainViewModel) {
+    val currentTedTalk by viewModel.currentTedTalk.collectAsState()
+    val hasTedFetchCompleted by viewModel.hasTedFetchCompleted.collectAsState()
+    val isTedLoading by viewModel.isTedLoading.collectAsState()
+    val isCalibrated by viewModel.isCalibrated.collectAsState()
+    
+    // Initial fetch if null
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (currentTedTalk == null && !isTedLoading) {
+            viewModel.fetchRandomTedTalk()
+        }
+    }
+
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentPlaybackPosition by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    // MediaPlayer State
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val mediaPlayer = remember { android.media.MediaPlayer() }
+    
+    // Cleanup MediaPlayer
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            try {
+                if (mediaPlayer.isPlaying) {
+                    mediaPlayer.stop()
+                }
+                mediaPlayer.release()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // Load Audio when talk changes
+    androidx.compose.runtime.LaunchedEffect(currentTedTalk) {
+        currentTedTalk?.let { talk ->
+            try {
+                mediaPlayer.reset()
+                mediaPlayer.setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
+                mediaPlayer.setDataSource(talk.audioUrl)
+                mediaPlayer.prepareAsync()
+                mediaPlayer.setOnPreparedListener { 
+                    // Ready to play
+                }
+                mediaPlayer.setOnCompletionListener { 
+                    isPlaying = false
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    // Handle Play/Pause
+    androidx.compose.runtime.LaunchedEffect(isPlaying) {
+        try {
+            if (isPlaying) {
+                if (!mediaPlayer.isPlaying) {
+                    mediaPlayer.start()
+                }
+            } else {
+                if (mediaPlayer.isPlaying) {
+                    mediaPlayer.pause()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    
+    // Rotation Animation
+    val currentRotation = remember { androidx.compose.animation.core.Animatable(0f) }
+    androidx.compose.runtime.LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            // Launch rotation animation
+            launch {
+                while (true) {
+                    currentRotation.animateTo(
+                        targetValue = currentRotation.value + 360f,
+                        animationSpec = tween(3000, easing = androidx.compose.animation.core.LinearEasing)
+                    )
+                }
+            }
+            // Launch position polling
+            while (true) {
+                if (mediaPlayer.isPlaying) {
+                    val pos = mediaPlayer.currentPosition.toLong()
+                    currentPlaybackPosition = pos
+                    viewModel.updatePlaybackPosition(pos)
+                }
+                kotlinx.coroutines.delay(100)
+            }
+        }
+    }
+
+    // Auto-scroll effect
+    // Calculate active line index
+    val activeIndex = remember(currentPlaybackPosition, currentTedTalk, isCalibrated) {
+        if (!isCalibrated) -1
+        else currentTedTalk?.transcriptLines?.indexOfLast { it.startTime <= currentPlaybackPosition } ?: -1
+    }
+
+    androidx.compose.runtime.LaunchedEffect(activeIndex) {
+        if (activeIndex >= 0) {
+            // Scroll to the item + 1 (because index 0 is the title/header)
+            // Or better, assume list contains [Header, ...Lines]
+            // Header is index 0. Lines start at index 1.
+            // So scrolling to activeIndex + 1.
+            try {
+                listState.animateScrollToItem(activeIndex + 1)
+            } catch (e: Exception) {
+                // Ignore scroll errors
+            }
+        }
+    }
+
+    // Show Loading if fetch hasn't completed yet
+    if (!hasTedFetchCompleted) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator()
+        }
+        return
+    }
+
+    // Show Empty/Error if fetch completed but no talk found
+    if (currentTedTalk == null) {
+         Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable { viewModel.fetchRandomTedTalk() },
+            contentAlignment = Alignment.Center
+         ) {
+            Text("暂无内容 (点击刷新)", color = Color.Gray)
+        }
+        return
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Top Half: Record Player
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color(0xFFF5F5F5)), 
+            contentAlignment = Alignment.Center
+        ) {
+            // Vinyl Record Container (Static Size)
+            Box(
+                modifier = Modifier.size(240.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // 1. Visual Layer (Rotating)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .rotate(currentRotation.value)
+                        .clip(CircleShape)
+                        .background(Color.Black)
+                        .border(2.dp, Color.Gray, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Cover Image
+                    if (currentTedTalk != null) {
+                        coil.compose.AsyncImage(
+                            model = currentTedTalk?.imageUrl,
+                            contentDescription = "Cover",
+                            modifier = Modifier
+                                .size(130.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(130.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFE53935)) 
+                        )
+                    }
+                    
+                    // Vinyl grooves
+                    Box(modifier = Modifier.size(200.dp).border(1.dp, Color(0xFF333333), CircleShape))
+                    Box(modifier = Modifier.size(160.dp).border(1.dp, Color(0xFF333333), CircleShape))
+                }
+
+                // 2. Interaction Layer (Static & Transparent)
+                // We handle gestures here so coordinates don't rotate with the vinyl
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { },
+                                onDragEnd = { },
+                                onDrag = { change, dragAmount ->
+                                    val center = Offset(size.width / 2f, size.height / 2f)
+                                    val currentPos = change.position
+                                    val prevPos = change.position - dragAmount
+                                    
+                                    // Calculate angles
+                                    val currentAngle = kotlin.math.atan2(currentPos.y - center.y, currentPos.x - center.x)
+                                    val prevAngle = kotlin.math.atan2(prevPos.y - center.y, prevPos.x - center.x)
+                                    
+                                    var angleDiff = (currentAngle - prevAngle).toDouble()
+                                    
+                                    // Handle wrap-around (e.g. PI to -PI)
+                                    if (angleDiff > Math.PI) angleDiff -= 2 * Math.PI
+                                    if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI
+                                    
+                                    // Sensitivity: 1 full rotation (2PI) = 60 seconds (60000ms)
+                                    // So ms = (diff / 2PI) * 60000
+                                    val seekMs = (angleDiff / (2 * Math.PI)) * 60000
+                                    
+                                    val newPos = (mediaPlayer.currentPosition + seekMs).toInt()
+                                    val duration = mediaPlayer.duration
+                                    
+                                    if (duration > 0) {
+                                        val clampedPos = newPos.coerceIn(0, duration)
+                                        mediaPlayer.seekTo(clampedPos)
+                                    }
+                                }
+                            )
+                        }
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = { isPlaying = !isPlaying }
+                            )
+                        }
+                )
+
+                // Play Button Overlay (Static, on top)
+                if (!isPlaying) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(64.dp)
+                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                            .padding(8.dp)
+                    )
+                }
+            }
+        }
+
+        // Bottom Half: Text
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(16.dp)
+        ) {
+             androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState
+            ) {
+                item {
+                    Text(
+                        text = currentTedTalk?.title ?: "Loading...",
+                        fontSize = 20.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                }
+                if (currentTedTalk?.transcriptLines.isNullOrEmpty()) {
+                    item {
+                         Text(
+                            text = currentTedTalk?.transcript ?: "...",
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp,
+                            color = Color.DarkGray
+                        )
+                    }
+                } else {
+                    itemsIndexed(currentTedTalk!!.transcriptLines) { index, line ->
+                         val isActive = index == activeIndex
+                         Text(
+                            text = line.text,
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp,
+                            color = if (isActive) Color.Red else Color.DarkGray,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable {
+                                    mediaPlayer?.seekTo(line.startTime.toInt())
+                                }
+                        )
+                    }
+                }
             }
         }
     }
@@ -414,6 +777,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
 fun CameraContent(viewModel: MainViewModel) {
     var isPhotoCaptured by remember { mutableStateOf(false) }
     var isTakingPhoto by remember { mutableStateOf(false) }
+
     var capturedPhotoPath by remember { mutableStateOf<String?>(null) }
     val imageCapture = remember { ImageCapture.Builder().build() }
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -501,6 +865,8 @@ fun CameraContent(viewModel: MainViewModel) {
                     .fillMaxWidth()
                     .height(maxHeight - initialPreviewHeight)
             ) {
+
+
                 if (isTakingPhoto) {
                     val buttonSize = 80.dp
                     val bottomBarHeight = maxHeight - initialPreviewHeight
@@ -513,11 +879,18 @@ fun CameraContent(viewModel: MainViewModel) {
                             .align(Alignment.TopCenter),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "正在拍照中",
-                            color = Color.Black,
-                            fontSize = 16.sp
-                        )
+                        androidx.compose.material3.Surface(
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+                            color = Color.DarkGray.copy(alpha = 0.9f),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "正在拍照中",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
                 Button(

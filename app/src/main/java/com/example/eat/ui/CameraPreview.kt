@@ -64,6 +64,7 @@ fun CameraPreview(
         val previewView = remember { PreviewView(context) }
 
         LaunchedEffect(cameraSelector, lifecycleOwner, imageCapture) {
+
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
             val cameraProvider = cameraProviderFuture.get()
             
@@ -88,6 +89,7 @@ fun CameraPreview(
                         preview
                     )
                 }
+
             } catch (exc: Exception) {
                 Log.e("CameraPreview", "Use case binding failed", exc)
             }

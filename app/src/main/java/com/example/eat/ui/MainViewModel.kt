@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,10 +33,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val eventDao = database.eventDao()
     private val healthDao = database.healthDao()
     private val articleDao = database.articleDao()
+    private val tedDao = database.tedDao()
     
     val articleUiState: StateFlow<ArticleUiState> = articleDao.getAllArticles()
         .map { ArticleUiState.Success(it) }
         .stateIn(viewModelScope, SharingStarted.Lazily, ArticleUiState.Loading)
+
+    val todayArticleCount: StateFlow<Int> = run {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfDay = calendar.timeInMillis
+        val endOfDay = startOfDay + 24 * 60 * 60 * 1000 - 1
+        articleDao.getArticleCountByDateRange(startOfDay, endOfDay)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    }
 
 
     val events: StateFlow<List<Event>?> = eventDao.getAllEvents()
@@ -183,6 +197,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun isArticleExists(title: String): Boolean {
+        return articleDao.getArticleByTitle(title) != null
+    }
+
     fun deleteArticle(article: com.example.eat.data.ArticleEntity) {
         viewModelScope.launch {
             articleDao.deleteArticle(article)
@@ -230,6 +248,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+
+    fun updateEventCategory(timestamps: List<Long>, newType: String) {
+        viewModelScope.launch {
+            eventDao.updateEventType(timestamps, newType)
         }
     }
 
@@ -286,6 +310,163 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
+    private val tedRepository = com.example.eat.data.TedRepository()
+    
+    private val _currentTedTalk = kotlinx.coroutines.flow.MutableStateFlow<com.example.eat.data.TedTalkItem?>(null)
+    val currentTedTalk: StateFlow<com.example.eat.data.TedTalkItem?> = _currentTedTalk.asStateFlow()
+    
+    // Loading State
+    private val _isTedLoading = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isTedLoading: StateFlow<Boolean> = _isTedLoading.asStateFlow()
+
+    private val _hasTedFetchCompleted = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val hasTedFetchCompleted: StateFlow<Boolean> = _hasTedFetchCompleted.asStateFlow()
+
+    private val _currentPlaybackPosition = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val currentPlaybackPosition: StateFlow<Long> = _currentPlaybackPosition.asStateFlow()
+
+    fun updatePlaybackPosition(position: Long) {
+        _currentPlaybackPosition.value = position
+    }
+
+    private val _isCalibrated = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isCalibrated: StateFlow<Boolean> = _isCalibrated.asStateFlow()
+
+    fun fetchRandomTedTalk() {
+        viewModelScope.launch {
+            _isTedLoading.value = true
+            _hasTedFetchCompleted.value = false
+            _isCalibrated.value = false
+
+            // 1. Check Local Cache
+            val cachedTalk = tedDao.getLatestTalk()
+            val today = java.time.LocalDate.now().toEpochDay()
+            val cachedDay = if (cachedTalk != null) java.time.Instant.ofEpochMilli(cachedTalk.fetchTimestamp).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay() else -1L
+
+            if (cachedTalk != null && cachedDay == today) {
+                // Use cached talk
+                _currentTedTalk.value = com.example.eat.data.TedTalkItem(
+                    title = cachedTalk.title,
+                    description = cachedTalk.description,
+                    audioUrl = cachedTalk.audioUrl,
+                    imageUrl = cachedTalk.imageUrl,
+                    link = cachedTalk.link,
+                    transcript = cachedTalk.transcript,
+                    transcriptLines = cachedTalk.transcriptLines,
+                    rawTranscriptLines = cachedTalk.transcriptLines, // Assuming stored lines are raw
+                    duration = cachedTalk.duration
+                )
+                _isTedLoading.value = false
+                _hasTedFetchCompleted.value = true
+                return@launch
+            }
+
+            // 2. Fetch from Network if no valid cache
+            // Clean old cache first
+            tedDao.deleteAllTalks()
+
+            val talks = tedRepository.fetchTedTalks().toMutableList()
+            var foundTalk: com.example.eat.data.TedTalkItem? = null
+            var attempts = 0
+            val maxAttempts = 5
+
+            while (foundTalk == null && attempts < maxAttempts && talks.isNotEmpty()) {
+                attempts++
+                val candidateIndex = talks.indices.random()
+                val candidate = talks[candidateIndex]
+                
+                // Try fetching transcript
+                // We do this inside the loop (suspending)
+                val (transcriptLinesSorted, videoDuration) = tedRepository.fetchTranscript(candidate.link)
+                
+                if (transcriptLinesSorted.isNotEmpty()) {
+                    var finalLines = transcriptLinesSorted
+                    
+                    // Logic: RSS audio duration (e.g. 15:00) vs Video duration (e.g. 14:40)
+                    // The difference is usually the intro.
+                    // If RSS > Video, offset = RSS - Video.
+                    // But we need to convert everything to milliseconds.
+                    val rssDurationSec = candidate.duration 
+                    if (rssDurationSec > 0 && videoDuration > 0) {
+                        val offsetSec = rssDurationSec - videoDuration
+                        
+                        // Heuristic: If offset is positive and reasonable (e.g. < 300s), assume it's intro.
+                        // Sometimes offset might be weird if metadata is bad.
+                        // Common intro is ~5-15s.
+                        if (offsetSec > 0 && offsetSec < 300) { 
+                             val offsetMs = offsetSec * 1000
+                             finalLines = transcriptLinesSorted.map { 
+                                 it.copy(startTime = it.startTime + offsetMs) 
+                             }
+                        }
+                    }
+                    
+                    // Create a single string for fallback compatibility if needed, 
+                    // or just use the lines.
+                    val fullText = finalLines.joinToString("\n\n") { it.text }
+                    foundTalk = candidate.copy(
+                        transcript = fullText,
+                        transcriptLines = finalLines,
+                        rawTranscriptLines = transcriptLinesSorted
+                    )
+                } else {
+                    // Remove this candidate from potential list so we don't pick it again
+                    talks.removeAt(candidateIndex)
+                }
+            }
+
+            // Fallback: if loop finished without success, just pick a random one with description
+            if (foundTalk == null && talks.isNotEmpty()) {
+                 // Re-fetch original list if we emptied it, or just use what's left
+                 // Simple fallback: just use the initial random one (even if no transcript)
+                 // or show error? Better to show something.
+                 val fallback = tedRepository.fetchTedTalks().randomOrNull()
+                 foundTalk = fallback
+            }
+
+            if (foundTalk != null) {
+                 // Save to Cache
+                 val entity = com.example.eat.data.TedTalkEntity(
+                     title = foundTalk.title,
+                     description = foundTalk.description,
+                     audioUrl = foundTalk.audioUrl,
+                     imageUrl = foundTalk.imageUrl,
+                     link = foundTalk.link,
+                     transcript = foundTalk.transcript,
+                     duration = foundTalk.duration,
+                     fetchTimestamp = System.currentTimeMillis(),
+                     transcriptLines = foundTalk.transcriptLines
+                 )
+                 tedDao.insertTalk(entity)
+            }
+
+            _currentTedTalk.value = foundTalk
+            _isTedLoading.value = false
+            _hasTedFetchCompleted.value = true
+        }
+    }
+    
+    fun syncTranscript(currentAudioPositionMs: Long) {
+        val currentTalk = _currentTedTalk.value ?: return
+        if (currentTalk.rawTranscriptLines.isEmpty()) return
+        
+        // Logic:
+        // User clicks "Sync" when they hear the first sentence.
+        // This means, the actual start of the first sentence in the AUDIO is 'currentAudioPositionMs'.
+        // In raw transcript, the first sentence usually starts at 0 (or very close to it).
+        // So offset = currentAudioPositionMs - firstLine.rawStartTime.
+        // We apply this offset to ALL lines.
+        
+        val firstLineRawTime = currentTalk.rawTranscriptLines.firstOrNull()?.startTime ?: 0L
+        val offset = currentAudioPositionMs - firstLineRawTime
+        
+        val newLines = currentTalk.rawTranscriptLines.map { 
+            it.copy(startTime = it.startTime + offset) 
+        }
+        
+        _currentTedTalk.value = currentTalk.copy(transcriptLines = newLines)
+        _isCalibrated.value = true
+    }
 }
 
 sealed interface ArticleUiState {

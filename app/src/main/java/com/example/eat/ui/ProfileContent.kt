@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -58,10 +59,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ImageBitmap
@@ -97,7 +100,11 @@ private data class LayoutData(
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
+fun ProfileContent(
+    viewModel: MainViewModel, 
+    selectedDate: Long,
+    onDateChange: (Long) -> Unit
+) {
     val scrollState = rememberScrollState()
     val textMeasurer = rememberTextMeasurer()
     val context = LocalContext.current
@@ -107,6 +114,7 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
     
     // Show toast when date changes and there's no data
     androidx.compose.runtime.LaunchedEffect(selectedDate) {
+        scrollState.scrollTo(0)
         // Wait a bit for the data to load
         kotlinx.coroutines.delay(100)
         if (events != null && events!!.isEmpty()) {
@@ -127,129 +135,7 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
     var selectedEvent by remember { mutableStateOf<Event?>(null) }
     var showEventDetail by remember { mutableStateOf(false) }
 
-    // 1. Determine Key Hours and Layout Logic
     val currentEvents = events
-    if (currentEvents == null) {
-        // Loading state: Show loading indicator
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            androidx.compose.material3.CircularProgressIndicator()
-        }
-        return
-    }
-
-
-    val hasData = currentEvents.isNotEmpty()
-
-    // We need density to convert dp to px for calculation
-    val density = androidx.compose.ui.platform.LocalDensity.current
-
-    // Optimize: Cache expensive layout calculations
-    val layoutData = remember(currentEvents, density) {
-        val keyHours = mutableSetOf<String>()
-        val activeHours = mutableSetOf<Int>()
-        val hourYPositions = mutableMapOf<String, Float>()
-        val activeHeightPx = with(density) { 90.dp.toPx() }
-
-        var currentY = 50f // startY
-
-        if (currentEvents.isEmpty()) {
-            // Empty State: 3-hour intervals, 80dp spacing
-            val step = 3
-            val spacingPx = with(density) { 80.dp.toPx() }
-
-            for (h in 0..24 step step) {
-                val key = "$h:00"
-                keyHours.add(key)
-                hourYPositions[key] = currentY
-                if (h < 24) {
-                    currentY += spacingPx
-                }
-            }
-        } else {
-            // Dynamic State: Based on events with 30-minute intervals
-            val activeHalfHours = mutableSetOf<String>()
-
-            // Reuse SimpleDateFormat instance
-            val hourFormat = SimpleDateFormat("H", Locale.getDefault())
-            val minuteFormat = SimpleDateFormat("m", Locale.getDefault())
-
-            currentEvents.forEach { event ->
-                val date = Date(event.latestTimestamp)
-                val hour = hourFormat.format(date).toInt()
-                val minute = minuteFormat.format(date).toInt()
-
-                // Determine which 30-minute segment this event falls into
-                val halfHourKey = if (minute < 30) {
-                    "$hour:00"
-                } else {
-                    "$hour:30"
-                }
-                activeHalfHours.add(halfHourKey)
-                activeHours.add(hour)
-            }
-
-            // Generate 30-minute interval marks around active segments
-            activeHalfHours.forEach { halfHourKey ->
-                val parts = halfHourKey.split(":")
-                val hour = parts[0].toInt()
-                val isOnHour = parts[1] == "00"
-
-                if (isOnHour) {
-                    // Event in :00-:29, add marks at hour:00 and hour:30
-                    keyHours.add("$hour:00")
-                    keyHours.add("$hour:30")
-                } else {
-                    // Event in :30-:59, add marks at hour:30 and (hour+1):00
-                    keyHours.add("$hour:30")
-                    keyHours.add("${hour + 1}:00")
-                }
-            }
-
-            // Also add 0:00 and 24:00
-            keyHours.add("0:00")
-            keyHours.add("24:00")
-
-            // Sort keys properly
-            val sortedKeyHours = keyHours.toList().sortedWith(compareBy(
-                { it.split(":")[0].toInt() },
-                { it.split(":")[1].toInt() }
-            ))
-
-            val activeSegmentPx = with(density) { 200.dp.toPx() } // Active segment spacing (changed to 200dp)
-            val inactiveSegmentPx = with(density) { 50.dp.toPx() }
-
-            sortedKeyHours.forEachIndexed { index, hourMark ->
-                hourYPositions[hourMark] = currentY
-
-                if (index < sortedKeyHours.size - 1) {
-                    // Check if this segment is active
-                    val isActive = activeHalfHours.contains(hourMark)
-                    val segmentHeight = if (isActive) activeSegmentPx else inactiveSegmentPx
-                    currentY += segmentHeight
-                }
-            }
-        }
-
-        val totalHeightPx = currentY + with(density) { 50.dp.toPx() } // Add bottom padding
-        val totalHeightDp = with(density) { totalHeightPx.toDp() }
-        val sortedKeyHours = keyHours.toList().sortedWith(compareBy(
-            { it.split(":")[0].toInt() },
-            { it.split(":")[1].toInt() }
-        ))
-
-        LayoutData(
-            hasData = currentEvents.isNotEmpty(),
-            keyHours = keyHours,
-            activeHours = activeHours,
-            hourYPositions = hourYPositions,
-            activeHeightPx = activeHeightPx,
-            totalHeightDp = totalHeightDp,
-            sortedKeyHours = sortedKeyHours
-        )
-    }
 
 
     Scaffold(
@@ -257,14 +143,14 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
             androidx.compose.material3.Surface(
                 modifier = Modifier
                     .size(56.dp)
-                    .clip(CircleShape)
+                    .clip(RoundedCornerShape(16.dp))
                     .combinedClickable(
                         onClick = { showHealthDialog = true },
                         onLongClick = { showClearAllDialog = true }
                     ),
                 color = Color.Black,
                 contentColor = Color.White,
-                shape = CircleShape,
+                shape = RoundedCornerShape(16.dp),
                 shadowElevation = 6.dp
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -273,25 +159,168 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
             }
         }
     ) { paddingValues ->
-        BoxWithConstraints(
+        var dragOffset by remember { mutableStateOf(0f) }
+        
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .verticalScroll(scrollState)
+                .pointerInput(selectedDate) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (kotlin.math.abs(dragOffset) > 100f) {
+                                val calendar = java.util.Calendar.getInstance()
+                                calendar.timeInMillis = selectedDate
+                                
+                                if (dragOffset > 0) {
+                                    // Swipe Right -> Previous Day
+                                    calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+                                    onDateChange(calendar.timeInMillis)
+                                } else {
+                                    // Swipe Left -> Next Day
+                                    calendar.add(java.util.Calendar.DAY_OF_YEAR, 1)
+                                    onDateChange(calendar.timeInMillis)
+                                }
+                            }
+                            dragOffset = 0f
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            dragOffset += dragAmount
+                        }
+                    )
+                }
         ) {
-            val containerWidth = maxWidth
-            val containerWidthPx = with(density) { containerWidth.toPx() }
+            if (currentEvents == null) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator()
+                }
+            } else {
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                // Optimize: Cache expensive layout calculations
+                val layoutData = remember(currentEvents, density) {
+                    val keyHours = mutableSetOf<String>()
+                    val activeHours = mutableSetOf<Int>()
+                    val hourYPositions = mutableMapOf<String, Float>()
+                    val activeHeightPx = with(density) { 90.dp.toPx() }
+            
+                    var currentY = 50f // startY
+            
+                    if (currentEvents.isEmpty()) {
+                        // Empty State: 3-hour intervals, 80dp spacing
+                        val step = 3
+                        val spacingPx = with(density) { 80.dp.toPx() }
+            
+                        for (h in 0..24 step step) {
+                            val key = "$h:00"
+                            keyHours.add(key)
+                            hourYPositions[key] = currentY
+                            if (h < 24) {
+                                currentY += spacingPx
+                            }
+                        }
+                    } else {
+                        // Dynamic State: Based on events with 30-minute intervals
+                        val activeHalfHours = mutableSetOf<String>()
+            
+                        // Reuse SimpleDateFormat instance
+                        val hourFormat = SimpleDateFormat("H", Locale.getDefault())
+                        val minuteFormat = SimpleDateFormat("m", Locale.getDefault())
+            
+                        currentEvents.forEach { event ->
+                            val date = Date(event.latestTimestamp)
+                            val hour = hourFormat.format(date).toInt()
+                            val minute = minuteFormat.format(date).toInt()
+            
+                            // Determine which 30-minute segment this event falls into
+                            val halfHourKey = if (minute < 30) {
+                                "$hour:00"
+                            } else {
+                                "$hour:30"
+                            }
+                            activeHalfHours.add(halfHourKey)
+                            activeHours.add(hour)
+                        }
+            
+                        // Generate 30-minute interval marks around active segments
+                        activeHalfHours.forEach { halfHourKey ->
+                            val parts = halfHourKey.split(":")
+                            val hour = parts[0].toInt()
+                            val isOnHour = parts[1] == "00"
+            
+                            if (isOnHour) {
+                                // Event in :00-:29, add marks at hour:00 and hour:30
+                                keyHours.add("$hour:00")
+                                keyHours.add("$hour:30")
+                            } else {
+                                // Event in :30-:59, add marks at hour:30 and (hour+1):00
+                                keyHours.add("$hour:30")
+                                keyHours.add("${hour + 1}:00")
+                            }
+                        }
+            
+                        // Also add 0:00 and 24:00
+                        keyHours.add("0:00")
+                        keyHours.add("24:00")
+            
+                        // Sort keys properly
+                        val sortedKeyHours = keyHours.toList().sortedWith(compareBy(
+                            { it.split(":")[0].toInt() },
+                            { it.split(":")[1].toInt() }
+                        ))
+            
+                        val activeSegmentPx = with(density) { 200.dp.toPx() } // Active segment spacing (changed to 200dp)
+                        val inactiveSegmentPx = with(density) { 50.dp.toPx() }
+            
+                        sortedKeyHours.forEachIndexed { index, hourMark ->
+                            hourYPositions[hourMark] = currentY
+            
+                            if (index < sortedKeyHours.size - 1) {
+                                // Check if this segment is active
+                                val isActive = activeHalfHours.contains(hourMark)
+                                val segmentHeight = if (isActive) activeSegmentPx else inactiveSegmentPx
+                                currentY += segmentHeight
+                            }
+                        }
+                    }
+            
+                    val totalHeightPx = currentY + with(density) { 50.dp.toPx() } // Add bottom padding
+                    val totalHeightDp = with(density) { totalHeightPx.toDp() }
+                    val sortedKeyHours = keyHours.toList().sortedWith(compareBy(
+                        { it.split(":")[0].toInt() },
+                        { it.split(":")[1].toInt() }
+                    ))
+            
+                    LayoutData(
+                        hasData = currentEvents.isNotEmpty(),
+                        keyHours = keyHours,
+                        activeHours = activeHours,
+                        hourYPositions = hourYPositions,
+                        activeHeightPx = activeHeightPx,
+                        totalHeightDp = totalHeightDp,
+                        sortedKeyHours = sortedKeyHours
+                    )
+                }
 
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(layoutData.totalHeightDp)
-                    .padding(horizontal = 16.dp)
-            ) {
-                val centerX = size.width / 2
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                ) {
+                    val containerWidth = maxWidth
+                    val containerWidthPx = with(density) { containerWidth.toPx() }
 
-                // 3. Render Timeline Segments
-                layoutData.sortedKeyHours.forEachIndexed { index, hour ->
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(layoutData.totalHeightDp)
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        val centerX = size.width / 2
+
+                        // 3. Render Timeline Segments
+                        layoutData.sortedKeyHours.forEachIndexed { index, hour ->
+                            // ... (Existing Canvas Drawing Code)
+
                     val startY = layoutData.hourYPositions[hour]!!
 
                     // Draw Marker (Circle + Text)
@@ -529,9 +558,11 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
                     }
                 }
 
+    }
             }
         }
     }
+}
 
     if (showHealthDialog) {
         AlertDialog(
@@ -622,8 +653,34 @@ fun ProfileContent(viewModel: MainViewModel, selectedDate: Long) {
         AlertDialog(
             onDismissRequest = { showEventDetail = false },
             title = { 
-                val titleText = if (selectedEvent!!.type == "Main Meal") "正餐" else "零食"
-                Text(titleText) 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val titleText = if (selectedEvent!!.type == "Main Meal") "正餐" else "零食"
+                    Text(titleText)
+                    
+                    if (selectedEvent!!.type == "Main Meal") {
+                        TextButton(
+                            onClick = {
+                                viewModel.updateEventCategory(selectedEvent!!.timestamps, "Snack")
+                                showEventDetail = false
+                            }
+                        ) {
+                            Text("改为零食")
+                        }
+                    } else if (selectedEvent!!.type == "Snack") {
+                         TextButton(
+                            onClick = {
+                                viewModel.updateEventCategory(selectedEvent!!.timestamps, "Main Meal")
+                                showEventDetail = false
+                            }
+                        ) {
+                            Text("改为正餐")
+                        }
+                    }
+                }
             },
             text = {
                 Column {

@@ -5,11 +5,14 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [EventEntity::class, HealthDataEntity::class, ArticleEntity::class], version = 3)
+@androidx.room.TypeConverters(Converters::class)
+@Database(entities = [EventEntity::class, HealthDataEntity::class, ArticleEntity::class, TedTalkEntity::class], version = 4)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
     abstract fun healthDao(): HealthDao
     abstract fun articleDao(): ArticleDao
+    abstract fun tedDao(): TedDao
+
 
     companion object {
         @Volatile

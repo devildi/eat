@@ -24,4 +24,7 @@ interface EventDao {
 
     @Query("SELECT * FROM events WHERE timestamp >= :startTime AND timestamp < :endTime ORDER BY timestamp ASC")
     fun getEventsByDateRange(startTime: Long, endTime: Long): Flow<List<EventEntity>>
+
+    @Query("UPDATE events SET type = :newType WHERE timestamp IN (:timestamps)")
+    suspend fun updateEventType(timestamps: List<Long>, newType: String)
 }

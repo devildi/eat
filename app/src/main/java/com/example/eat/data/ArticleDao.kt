@@ -19,4 +19,10 @@ interface ArticleDao {
     
     @Query("DELETE FROM articles")
     suspend fun clearAll()
+
+    @Query("SELECT * FROM articles WHERE title = :title LIMIT 1")
+    suspend fun getArticleByTitle(title: String): ArticleEntity?
+
+    @Query("SELECT COUNT(*) FROM articles WHERE timestamp >= :startTime AND timestamp <= :endTime")
+    fun getArticleCountByDateRange(startTime: Long, endTime: Long): Flow<Int>
 }

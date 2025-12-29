@@ -84,4 +84,6 @@ dependencies {
     implementation(libs.retrofit.converter.scalars)
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
+    implementation(libs.nanohttpd)
+    implementation(libs.gson)
 }

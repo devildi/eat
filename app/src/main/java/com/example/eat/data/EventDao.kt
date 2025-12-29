@@ -13,6 +13,9 @@ interface EventDao {
     @Query("SELECT * FROM events ORDER BY timestamp ASC")
     fun getAllEvents(): Flow<List<EventEntity>>
 
+    @Query("SELECT * FROM events ORDER BY timestamp ASC")
+    suspend fun getAllEventsSync(): List<EventEntity>
+
     @Query("DELETE FROM events")
     suspend fun deleteAllEvents()
 

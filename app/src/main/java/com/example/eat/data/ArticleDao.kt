@@ -11,6 +11,9 @@ interface ArticleDao {
     @Query("SELECT * FROM articles ORDER BY timestamp DESC")
     fun getAllArticles(): Flow<List<ArticleEntity>>
 
+    @Query("SELECT * FROM articles ORDER BY timestamp DESC")
+    suspend fun getAllArticlesSync(): List<ArticleEntity>
+
     @Insert
     suspend fun insertArticle(article: ArticleEntity)
 

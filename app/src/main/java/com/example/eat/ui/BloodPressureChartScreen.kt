@@ -322,10 +322,11 @@ fun BloodPressureChartScreen(
                             drawCircle(color = color, radius = radius, center = Offset(x, y))
                             
                             if (isSelected) {
-                                val label = if (type == 0) "高压: ${value.toInt()}" else "低压: ${value.toInt()}"
+                                val label = "${value.toInt()}"
+                                val textColor = if (type == 0) Color.Red else Color.Green
                                 val textResult = textMeasurer.measure(
                                     text = label,
-                                    style = TextStyle(fontSize = 14.sp, color = Color.Red, fontWeight = FontWeight.Bold)
+                                    style = TextStyle(fontSize = 14.sp, color = textColor, fontWeight = FontWeight.Bold)
                                 )
                                 drawText(
                                     textLayoutResult = textResult,

@@ -15,5 +15,6 @@ data class TedTalkEntity(
     val transcript: String,
     val duration: Long,
     val fetchTimestamp: Long,
-    val transcriptLines: List<TranscriptLine>
+    val transcriptLines: List<TranscriptLine>,
+    val isCalibrated: Boolean = false
 )

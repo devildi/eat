@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -107,14 +108,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     // Date Picker State
     var showDatePicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf(System.currentTimeMillis()) }
-    val datePickerState = rememberDatePickerState(
-        initialSelectedDateMillis = selectedDate,
-        selectableDates = object : androidx.compose.material3.SelectableDates {
-            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                return utcTimeMillis <= System.currentTimeMillis()
-            }
-        }
-    )
+
     
     // Navigation State
     var showWeightChart by remember { mutableStateOf(false) }
@@ -141,6 +135,10 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     val playbackPosition by viewModel.currentPlaybackPosition.collectAsState()
     val isCalibrated by viewModel.isCalibrated.collectAsState()
     val todayArticleCount by viewModel.todayArticleCount.collectAsState()
+
+    // Config Dialog State
+    var showConfigDialog by remember { mutableStateOf(false) }
+    var showLanSync by remember { mutableStateOf(false) }
 
     // Loading Indicator
     if (isParsing) {
@@ -291,19 +289,123 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
         )
     }
 
-    if (showDatePicker) {
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let {
-                        selectedDate = it
+    if (showConfigDialog) {
+        val currentIsSyncEnabled by viewModel.isSyncEnabled.collectAsState()
+        val currentSyncTarget by viewModel.syncTarget.collectAsState()
+
+        var tempIsSyncEnabled by remember { mutableStateOf(currentIsSyncEnabled) }
+        var tempSyncTarget by remember { mutableStateOf(currentSyncTarget) }
+
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showConfigDialog = false },
+            title = { Text("配置选项") },
+            text = {
+                Column {
+                    // Sync Switch
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("数据同步")
+                        androidx.compose.material3.Switch(
+                            checked = tempIsSyncEnabled,
+                            onCheckedChange = { tempIsSyncEnabled = it }
+                        )
                     }
-                    showDatePicker = false
-                }) {
-                    Text("OK")
+
+                    // Sync Target Toggle
+                    if (tempIsSyncEnabled) {
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                        
+                        // Firebase Switch
+                        androidx.compose.foundation.layout.Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Firebase")
+                            androidx.compose.material3.Switch(
+                                checked = tempSyncTarget == "FIREBASE",
+                                onCheckedChange = { if (it) tempSyncTarget = "FIREBASE" }
+                            )
+                        }
+
+                        // Backend Switch
+                        androidx.compose.foundation.layout.Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("后台服务")
+                            androidx.compose.material3.Switch(
+                                checked = tempSyncTarget == "BACKEND",
+                                onCheckedChange = { if (it) tempSyncTarget = "BACKEND" }
+                            )
+                        }
+
+                        // LAN Sync Switch
+                        androidx.compose.foundation.layout.Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("局域网同步")
+                            androidx.compose.material3.Switch(
+                                checked = tempSyncTarget == "LAN",
+                                onCheckedChange = { if (it) tempSyncTarget = "LAN" }
+                            )
+                        }
+                    }
                 }
             },
+            confirmButton = {
+                TextButton(onClick = { 
+                    viewModel.setSyncEnabled(tempIsSyncEnabled)
+                    viewModel.setSyncTarget(tempSyncTarget)
+                    showConfigDialog = false 
+                    if (tempSyncTarget == "LAN") {
+                        showLanSync = true
+                    }
+                }) {
+                    Text("确认")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfigDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = null,
+            initialDisplayedMonthMillis = selectedDate,
+            selectableDates = object : androidx.compose.material3.SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    // Allow dates up to the current moment (effectively allowing "Today")
+                    return utcTimeMillis <= System.currentTimeMillis()
+                }
+            }
+        )
+
+        // Observe state changes. When a date is selected (becomes non-null), update and dismiss.
+        androidx.compose.runtime.LaunchedEffect(datePickerState) {
+            androidx.compose.runtime.snapshotFlow { datePickerState.selectedDateMillis }
+                .collect { selectedDateMillis ->
+                    if (selectedDateMillis != null) {
+                        selectedDate = selectedDateMillis
+                        showDatePicker = false
+                    }
+                }
+        }
+
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showDatePicker = false }) {
                     Text("Cancel")
@@ -335,9 +437,26 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
         return
     }
 
+    // Show LanSyncScreen if navigated
+    if (showLanSync) {
+        LanSyncScreen(onBack = { showLanSync = false }, viewModel = viewModel)
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
+                navigationIcon = {
+                    if (selectedItem == 3) {
+                        androidx.compose.material3.IconButton(onClick = { showDatePicker = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.DateRange,
+                                contentDescription = "Select Date",
+                                tint = Color.Black
+                            )
+                        }
+                    }
+                },
                 title = {
                     val titleText = when (selectedItem) {
                         0 -> "每日阅读"
@@ -395,6 +514,14 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                             Icon(
                                 imageVector = Icons.Filled.Favorite,
                                 contentDescription = "Blood Pressure Chart",
+                                tint = Color.Black
+                            )
+                        }
+                        // Settings Icon for Config
+                        androidx.compose.material3.IconButton(onClick = { showConfigDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Settings,
+                                contentDescription = "Configuration",
                                 tint = Color.Black
                             )
                         }
@@ -483,6 +610,7 @@ fun ListeningContent(viewModel: MainViewModel) {
     }
 
     var isPlaying by remember { mutableStateOf(false) }
+    var isPrepared by remember { mutableStateOf(false) } // Track preparation state
     var currentPlaybackPosition by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
@@ -508,6 +636,7 @@ fun ListeningContent(viewModel: MainViewModel) {
     androidx.compose.runtime.LaunchedEffect(currentTedTalk) {
         currentTedTalk?.let { talk ->
             try {
+                isPrepared = false // Reset prepared state
                 mediaPlayer.reset()
                 mediaPlayer.setAudioAttributes(
                     android.media.AudioAttributes.Builder()
@@ -519,6 +648,10 @@ fun ListeningContent(viewModel: MainViewModel) {
                 mediaPlayer.prepareAsync()
                 mediaPlayer.setOnPreparedListener { 
                     // Ready to play
+                    isPrepared = true
+                    if (isPlaying) {
+                        it.start()
+                    }
                 }
                 mediaPlayer.setOnCompletionListener { 
                     isPlaying = false
@@ -533,7 +666,7 @@ fun ListeningContent(viewModel: MainViewModel) {
     androidx.compose.runtime.LaunchedEffect(isPlaying) {
         try {
             if (isPlaying) {
-                if (!mediaPlayer.isPlaying) {
+                if (isPrepared && !mediaPlayer.isPlaying) {
                     mediaPlayer.start()
                 }
             } else {
@@ -764,6 +897,7 @@ fun ListeningContent(viewModel: MainViewModel) {
                                 .padding(vertical = 4.dp)
                                 .clickable {
                                     mediaPlayer?.seekTo(line.startTime.toInt())
+                                    isPlaying = true
                                 }
                         )
                     }

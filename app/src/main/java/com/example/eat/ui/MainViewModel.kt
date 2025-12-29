@@ -34,6 +34,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val healthDao = database.healthDao()
     private val articleDao = database.articleDao()
     private val tedDao = database.tedDao()
+    private val syncManager = com.example.eat.utils.SyncManager(application, articleDao, healthDao, eventDao)
+
+    private val _serverIp = kotlinx.coroutines.flow.MutableStateFlow("")
+    val serverIp: StateFlow<String> = _serverIp.asStateFlow()
+
+    private val _syncStatus = kotlinx.coroutines.flow.MutableStateFlow("")
+    val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
+
+    private val _backupSummary = kotlinx.coroutines.flow.MutableStateFlow<com.example.eat.utils.BackupSummary?>(null)
+    val backupSummary: StateFlow<com.example.eat.utils.BackupSummary?> = _backupSummary.asStateFlow()
+
+    private val _isSyncing = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    fun startLanServer() {
+        try {
+            val ip = syncManager.startServer()
+            _serverIp.value = ip
+            _syncStatus.value = "服务运行于 $ip"
+            // Ensure data is exported when server starts
+            viewModelScope.launch {
+                val summary = syncManager.exportData()
+                _backupSummary.value = summary
+                _syncStatus.value = "数据已打包并准备就绪"
+            }
+        } catch (e: Exception) {
+            _syncStatus.value = "启动服务失败: ${e.message}"
+        }
+    }
+
+    fun stopLanServer() {
+        syncManager.stopServer()
+        syncManager.deleteBackup()
+        _serverIp.value = ""
+        _syncStatus.value = "服务已停止"
+        _backupSummary.value = null
+    }
+
+    fun importLanData(ip: String) {
+        viewModelScope.launch {
+            _isSyncing.value = true
+            _syncStatus.value = "正在连接到 $ip..."
+            try {
+                val summary = syncManager.importData(ip)
+                val sizeMb = String.format("%.2f", summary.totalSizeBytes / (1024.0 * 1024.0))
+                _syncStatus.value = "同步成功！\n数据大小: ${sizeMb}MB\n文章: ${summary.articleCount}, 记录: ${summary.eventCount}, 健康数据: ${summary.healthDataCount}"
+            } catch (e: Exception) {
+                _syncStatus.value = "同步失败: ${e.message}"
+                e.printStackTrace()
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
     
     val articleUiState: StateFlow<ArticleUiState> = articleDao.getAllArticles()
         .map { ArticleUiState.Success(it) }
@@ -117,6 +171,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveWeight(weight: Float) {
         viewModelScope.launch {
+            // Calculate start and end of today
+            val calendar = java.util.Calendar.getInstance()
+            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            calendar.set(java.util.Calendar.MINUTE, 0)
+            calendar.set(java.util.Calendar.SECOND, 0)
+            calendar.set(java.util.Calendar.MILLISECOND, 0)
+            val startOfDay = calendar.timeInMillis
+            val endOfDay = startOfDay + 24 * 60 * 60 * 1000 - 1
+
+            // Delete existing weight data for today (Replace logic)
+            healthDao.deleteHealthDataByTypeAndDate("Weight", startOfDay, endOfDay)
+
             val healthData = com.example.eat.data.HealthDataEntity(
                 timestamp = System.currentTimeMillis(),
                 type = "Weight",
@@ -128,6 +194,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveBloodPressure(systolic: Float, diastolic: Float) {
         viewModelScope.launch {
+            // Calculate start and end of today
+            val calendar = java.util.Calendar.getInstance()
+            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            calendar.set(java.util.Calendar.MINUTE, 0)
+            calendar.set(java.util.Calendar.SECOND, 0)
+            calendar.set(java.util.Calendar.MILLISECOND, 0)
+            val startOfDay = calendar.timeInMillis
+            val endOfDay = startOfDay + 24 * 60 * 60 * 1000 - 1
+
+            // Delete existing blood pressure data for today (Replace logic)
+            healthDao.deleteHealthDataByTypeAndDate("BloodPressure", startOfDay, endOfDay)
+
             val healthData = com.example.eat.data.HealthDataEntity(
                 timestamp = System.currentTimeMillis(),
                 type = "BloodPressure",
@@ -354,10 +432,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     transcript = cachedTalk.transcript,
                     transcriptLines = cachedTalk.transcriptLines,
                     rawTranscriptLines = cachedTalk.transcriptLines, // Assuming stored lines are raw
-                    duration = cachedTalk.duration
+                    duration = cachedTalk.duration,
+                    isCalibrated = cachedTalk.isCalibrated
                 )
                 _isTedLoading.value = false
                 _hasTedFetchCompleted.value = true
+                _isCalibrated.value = cachedTalk.isCalibrated
                 return@launch
             }
 
@@ -435,7 +515,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                      transcript = foundTalk.transcript,
                      duration = foundTalk.duration,
                      fetchTimestamp = System.currentTimeMillis(),
-                     transcriptLines = foundTalk.transcriptLines
+                     transcriptLines = foundTalk.transcriptLines,
+                     isCalibrated = false
                  )
                  tedDao.insertTalk(entity)
             }
@@ -447,25 +528,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun syncTranscript(currentAudioPositionMs: Long) {
-        val currentTalk = _currentTedTalk.value ?: return
-        if (currentTalk.rawTranscriptLines.isEmpty()) return
-        
-        // Logic:
-        // User clicks "Sync" when they hear the first sentence.
-        // This means, the actual start of the first sentence in the AUDIO is 'currentAudioPositionMs'.
-        // In raw transcript, the first sentence usually starts at 0 (or very close to it).
-        // So offset = currentAudioPositionMs - firstLine.rawStartTime.
-        // We apply this offset to ALL lines.
-        
-        val firstLineRawTime = currentTalk.rawTranscriptLines.firstOrNull()?.startTime ?: 0L
-        val offset = currentAudioPositionMs - firstLineRawTime
-        
-        val newLines = currentTalk.rawTranscriptLines.map { 
-            it.copy(startTime = it.startTime + offset) 
+        viewModelScope.launch {
+            val currentTalk = _currentTedTalk.value ?: return@launch
+            if (currentTalk.rawTranscriptLines.isEmpty()) return@launch
+            
+            // Logic:
+            // User clicks "Sync" when they hear the first sentence.
+            // This means, the actual start of the first sentence in the AUDIO is 'currentAudioPositionMs'.
+            // In raw transcript, the first sentence usually starts at 0 (or very close to it).
+            // So offset = currentAudioPositionMs - firstLine.rawStartTime.
+            // We apply this offset to ALL lines.
+            
+            val firstLineRawTime = currentTalk.rawTranscriptLines.firstOrNull()?.startTime ?: 0L
+            val offset = currentAudioPositionMs - firstLineRawTime
+            
+            val newLines = currentTalk.rawTranscriptLines.map { 
+                it.copy(startTime = it.startTime + offset) 
+            }
+            
+            val updatedTalk = currentTalk.copy(
+                transcriptLines = newLines,
+                isCalibrated = true
+            )
+            _currentTedTalk.value = updatedTalk
+            _isCalibrated.value = true
+
+            // Persist the calibration
+            // We interpret "Calibration" as fixing the data for this talk.
+            // Since we only cache one talk, we overwrite the cache.
+            try {
+                tedDao.deleteAllTalks()
+                val entity = com.example.eat.data.TedTalkEntity(
+                    title = updatedTalk.title,
+                    description = updatedTalk.description,
+                    audioUrl = updatedTalk.audioUrl,
+                    imageUrl = updatedTalk.imageUrl,
+                    link = updatedTalk.link,
+                    transcript = updatedTalk.transcript,
+                    duration = updatedTalk.duration,
+                    fetchTimestamp = System.currentTimeMillis(), // We could keep the original or update it. Updating keeps it "fresh".
+                    transcriptLines = updatedTalk.transcriptLines,
+                    isCalibrated = true
+                )
+                tedDao.insertTalk(entity)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
-        
-        _currentTedTalk.value = currentTalk.copy(transcriptLines = newLines)
-        _isCalibrated.value = true
+    }
+
+    // Configuration State (Persistent)
+    private val sharedPreferences = application.getSharedPreferences("app_config", android.content.Context.MODE_PRIVATE)
+
+    private val _isSyncEnabled = kotlinx.coroutines.flow.MutableStateFlow(sharedPreferences.getBoolean("is_sync_enabled", false))
+    val isSyncEnabled: StateFlow<Boolean> = _isSyncEnabled.asStateFlow()
+
+    private val _syncTarget = kotlinx.coroutines.flow.MutableStateFlow(sharedPreferences.getString("sync_target", "FIREBASE") ?: "FIREBASE")
+    val syncTarget: StateFlow<String> = _syncTarget.asStateFlow()
+
+    fun setSyncEnabled(enabled: Boolean) {
+        _isSyncEnabled.value = enabled
+        sharedPreferences.edit().putBoolean("is_sync_enabled", enabled).apply()
+    }
+
+    fun setSyncTarget(target: String) {
+        _syncTarget.value = target
+        sharedPreferences.edit().putString("sync_target", target).apply()
     }
 }
 

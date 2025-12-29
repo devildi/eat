@@ -9,7 +9,8 @@ data class TedTalkItem(
     val transcript: String = "",
     val transcriptLines: List<TranscriptLine> = emptyList(),
     val rawTranscriptLines: List<TranscriptLine> = emptyList(),
-    val duration: Long = 0L
+    val duration: Long = 0L,
+    val isCalibrated: Boolean = false
 )
 
 data class TranscriptLine(

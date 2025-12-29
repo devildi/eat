@@ -25,8 +25,14 @@
         *   **Content Padding**: `16pt`.
         *   **Title**: Font `Headline` (Bold), MaxLines 1, Truncated Tail. Weight 1.
         *   **Date**: Font `Footnote` (Gray), Format "yy/MM/dd", Alignment Right.
+        *   **Interaction**:
+            *   **Tap**: 进入文章详情页.
+            *   **Long Press**: 弹出删除确认框.
+*   **文章详情页 (Detail Spec)**:
+    *   **NavBar**: Title "文章详情", Back Button.
+    *   **Content**: Scrollable `VStack`. Title (Headline, Bold) + Spacer (8pt) + Body Text.
 *   **添加交互**:
-    *   FAB (+) 点击 -> 弹窗输 URL -> Loading -> 编辑页（标题和正文分别放在两个textinput中） -> 查重 (按标题) -> 保存（写入本地）.
+    *   FAB (+) 点击 -> 弹窗输 URL (Parsing) -> 编辑页（标题/正文 TextInput） -> 保存.
 
 ### 3.2 标签页 2: 听力 (Listening)
 *   **导航栏 (Navigation Bar)**:
@@ -38,64 +44,83 @@
         *   **Vinyl Size**: `240pt x 240pt`.
         *   **Cover Size**: `130pt x 130pt` (Circle), Position Center.
         *   **Play Button**: Overlay `64pt`.
-    *   **Bottom Area (Transcript)**: 白色背景, 可滚动列表.
-*   **交互动画**:
-    *   **旋转**: 播放时 3s/圈.
-    *   **打碟**: 拖拽旋转, 1圈 = 60秒.
+        *   **Interaction**: 支持 "打碟" 手势 (Drag) 进行 Seek (1圈 = 60秒), 且播放时自动旋转.
+    *   **Bottom Area (Transcript)**: 白色背景, `List` 列表.
+        *   **Highlight**: 当前播放行高亮为红色 (Color.Red).
+        *   **Seek**: 点击任意行，音频跳转至该行 StartTime.
 *   **校准逻辑 (Calibration)**:
-    *   **场景**: RSS 音频流经常带有片头广告，导致音频与 TED 官网爬取的字幕时间轴不匹配（字幕往往也是从正片开始）。
-    *   **操作**: 用户听到正片第一句台词开始时，点击导航栏右上角的 "校准" 按钮。
-    *   **算法**:
-        1.  获取当前播放器时间 `currentPos`.
-        2.  获取字幕第一句的原始开始时间 `firstLineTime` (通常为 0 或极小值).
-        3.  计算偏移量 `offset = currentPos - firstLineTime`.
-        4.  将该 `offset` 加到**所有字幕行**的时间戳上.
-        5.  更新 UI，使字幕与音频同步。
+    *   点击校准按钮，将当前播放进度与第一句台词时间对齐，修正 RSS 音频片头偏差.
 
 ### 3.3 标签页 3: 相机 (Camera)
 *   **导航栏 (Navigation Bar)**:
     *   **Title**: "吃了什么"
-    *   **Trailing Item**: 无.
 *   **布局参数 (Layout Spec)**:
-    *   **Viewfinder (非全屏)**:
-        *   **AspectRatio**: `3:4` (Width = ScreenWidth, Height = Width * 4/3).
-        *   **Position**: Top aligned (under NavBar).
-        *   **Background**: Black.
-    *   **Bottom Control Area**:
-        *   **Height**: ScreenHeight - NavBarHeight - ViewfinderHeight. 白色背景.
-        *   **Shutter Button**: Size `80pt`. White ring. Center aligned.
-        *   **Toast "正在拍照中"**:
-            *   Position: 位于快门按钮上方，白色区域内顶部.
-            *   Style: `Capsule`, DarkGray (90% alpha), Text White 14sp, Padding H:16 V:8.
-*   **转场动画**:
-    *   拍照后，**4:3 的预览画面** 缩小 (Scale Down) 并移动，最终变成屏幕中心的一个 **圆形图标 (Diameter 80pt)**.
-    *   同时显示左侧 "Main Meal" 和右侧 "Snack" 区域 (Fade In).
+    *   **Viewfinder**: 宽高比 `3:4`. 拍照中显示实时预览.
+    *   **Bottom Control**:
+        *   **Shutter Button**: Size `80pt`, White ring.
+        *   **Toast**: 拍照时显示 "正在拍照中" Pill.
+*   **交互动画 (Interaction)**:
+    *   **Capture**: 拍照后，预览缩小为 Diameter `80pt` 的圆球，位于屏幕中心.
+    *   **Categorization (Drag)**:
+        *   显示左侧文本 "正餐"、右侧文本 "零食".
+        *   **Drag Left (< -200pt)**: 归类为 "Main Meal".
+        *   **Drag Right (> 200pt)**: 归类为 "Snack".
+        *   **Drag Vertical**:若是大幅度垂直拖动，则视为取消/重新拍摄 (Reset).
 
 ### 3.4 标签页 4: 我的 (Profile)
 *   **导航栏 (Navigation Bar)**:
     *   **Title**: 动态日期 "yyyy-MM-dd" (点击可弹出 DatePicker).
-    *   **Trailing Item 1**: 图标 `heart.fill` (血压图表入口).
-    *   **Trailing Item 2**: 图标 `chart.xyaxis.line` (体重图表入口).
+    *   **Actions**: 血压图表入口, 体重图表入口, 设置入口.
+*   **整体交互**:
+    *   **Horizontal Swipe**: 左右滑动屏幕可切换日期 (上一天/下一天).
 *   **布局参数 (Layout Spec)**:
-    *   **Header FAB**: Bottom Right. Size `56pt`. RoundedRect `cornerRadius: 16`. Color Black. Shadow 6.
-    *   **Timeline (Canvas)**:
-        *   **Hour Marks**: Circle Radius `8pt`. Text Offset `+50pt`. Line Width `4pt`.
-        *   **Event Items**:
-            *   **Content Box**: Light Blue (`#E0F7FA`). Corner `8pt`.
-            *   **Images**: `30pt` Circle. Overlap `15pt`.
-            *   **Text**: "正餐 HH:mm".
+    *   **Header FAB**: Bottom Right, "Add Health Data".
+    *   **Timeline (Custom Canvas)**:
+        *   **Hour Marks**: Circle Radius `8pt`. Text Offset `+50pt`.
+        *   **Lines**: 实线 (Active 期间)，虚线 (Inactive 期间).
+        *   **Item Placing**: 根据 `minute` 计算 Y 轴偏移. 重叠项目自动计算横向 Gap.
+    *   **Event Items**:
+        *   **Style**: Light Blue Box (`#E0F7FA`), Corner `8pt`.
+        *   **Content**: Time Text + Image Circles (Stack).
+        *   **Tap**: 弹出详情对话框 (Event Detail Dialog).
+*   **Event Detail Dialog**:
+    *   **Features**:
+        *   **Category Switch**: 按钮 "改为正餐/零食".
+        *   **Image Pager**: 左右滑动查看多图.
+        *   **Delete**: 删除当前事件或特定图片.
 
 ### 3.5 子页面: 数据图表 (Charts)
-*   **通用布局 (Canvas Layout Spec)**:
-    *   **Margins**: Left `80pt`, Top `40pt`, Right `40pt`, Bottom `60pt`.
-    *   **Axis Lines**: Stroke Width `2pt`, Color Black.
+*   **通用交互**:
+    *   **Vertical Swipe**: 上下滑动切换月份.
+    *   **Tap Point**: 点击数据点，显示具体数值 (Red Text).
 *   **体重页 (Weight)**:
-    *   **Y-Axis (Date)**: Top to Bottom.
-    *   **X-Axis (Value)**: Range `140` to `150` (Jin).
+    *   **X-Axis (Weight)**: Range `140` - `150` (Jin).
+    *   **Y-Axis (Date)**: Top (Day 1) to Bottom (Max Day).
 *   **血压页 (BP)**:
-    *   **Y-Axis (Date)**: Top to Bottom.
-    *   **X-Axis (Value)**: Range `70` to `150`.
-    *   **Lines**: Two paths (High/Low).
+    *   **X-Axis (Value)**: Range `70` - `150`.
+    *   **Series**: 绘制两条折线 (High / Low).
+
+### 3.6 局域网同步 (LAN Sync)
+*   **入口**: 首页 -> 配置对话框 -> "局域网同步" 选项 -> 确认.
+*   **功能目标**: 在局域网内无需外网，从“旧手机”向“新手机”传输所有数据（数据库+图片）。
+*   **UI 布局**:
+    *   **Navbar**: 标题 "局域网同步".
+    *   **Mode Selection**: 两个大按钮 "我是发送方", "我是接收方".
+    *   **Sender View**: 
+        *   **Backup Details**: 顶部显示动态饼状图 (Pie Chart)，展示 Articles, Images, HealthData, Events 的数量分布与百分比图例.
+        *   **Server Status**: 居中显示文本 "数据已打包并准备就绪" (中文).
+        *   **Address**: 显示本机 IP 端口 (e.g., `192.168.x.x:8081`). 提示 "请在接收方输入此 IP".
+    *   **Receiver View**: 输入框 (默认为空) + "连接并同步" 按钮 + 状态日志文本区域 (中文提示).
+*   **传输协议 (Tech Spec)**:
+    *   **Format**: `backup.zip`. 内含 `data.json` (所有表数据) 和 `images/` (所有图片文件).
+    *   **Sender (Server)**:
+        *   启动本地 HTTP Server.
+        *   **Dynamic Port**: 尝试绑定端口 8080. 若被占用，自动重试 8081-8090，直到成功.
+        *   **Stats Calculation**: 再启动服务前，先计算各类数据的数量 (Summary).
+        *   端点 `/backup.zip`: 实时打包数据库内容与图片文件夹为 Zip 流并返回.
+    *   **Receiver (Client)**:
+        *   HTTP GET `http://<IP>:8080/backup.zip`.
+        *   下载 -> 解压 -> 解析 JSON -> 批量插入/覆盖本地数据库 -> 复制图片到沙盒.
 
 ## 4. iOS 技术映射 (Tech Mapping)
 | Android Component | iOS Target | 说明 |
@@ -106,6 +131,8 @@
 | `Room` | **SwiftData** | 数据库 |
 | `Coil` | **Kingfisher** | 图片加载 |
 | `CameraX` | **AVFoundation** | 需自定义 PreviewLayer |
+| `NanoHTTPD` | **GCDWebServer** / **Telegraph** | 本地 HTTP 服务器 |
+| `java.util.zip` | **ZIPFoundation** | Zip 压缩与解压 |
 
 ## 5. 存储模型 (Schema)
 *   `Article`: `id`, `title`, `content`, `url`, `timestamp`

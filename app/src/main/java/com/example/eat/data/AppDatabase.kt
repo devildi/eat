@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @androidx.room.TypeConverters(Converters::class)
-@Database(entities = [EventEntity::class, HealthDataEntity::class, ArticleEntity::class, TedTalkEntity::class], version = 4)
+@Database(entities = [EventEntity::class, HealthDataEntity::class, ArticleEntity::class, TedTalkEntity::class], version = 5)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
     abstract fun healthDao(): HealthDao

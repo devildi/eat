@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.jetbrainsKotlinAndroid)
-    id("com.google.devtools.ksp") version "1.9.21-1.0.15"
+    id("com.google.devtools.ksp") version "1.9.0-1.0.13"
 }
 
 android {

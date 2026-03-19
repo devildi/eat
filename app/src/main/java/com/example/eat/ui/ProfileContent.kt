@@ -118,7 +118,13 @@ fun ProfileContent(
         // Wait a bit for the data to load
         kotlinx.coroutines.delay(100)
         if (events != null && events!!.isEmpty()) {
-            android.widget.Toast.makeText(context, "当日无数据", android.widget.Toast.LENGTH_SHORT).show()
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            val selectedDateString = dateFormat.format(java.util.Date(selectedDate))
+            val todayString = dateFormat.format(java.util.Date())
+            
+            if (selectedDateString != todayString) {
+                android.widget.Toast.makeText(context, "${selectedDateString}无数据", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

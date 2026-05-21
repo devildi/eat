@@ -1,5 +1,6 @@
 package com.example.eat.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.tween
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -1001,32 +1003,7 @@ fun CameraContent(viewModel: MainViewModel) {
             ) {
 
 
-                if (isTakingPhoto) {
-                    val buttonSize = 80.dp
-                    val bottomBarHeight = maxHeight - initialPreviewHeight
-                    val gapHeight = (bottomBarHeight - buttonSize) / 2
-                    
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(gapHeight)
-                            .align(Alignment.TopCenter),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        androidx.compose.material3.Surface(
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
-                            color = Color.DarkGray.copy(alpha = 0.9f),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = "正在拍照中",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-                }
+
                 Button(
                     onClick = {
                         if (!isTakingPhoto) {
@@ -1068,7 +1045,13 @@ fun CameraContent(viewModel: MainViewModel) {
                     ),
                     border = BorderStroke(2.dp, Color.Black)
                 ) {
-                    // Empty content
+                    if (isTakingPhoto) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(32.dp),
+                            color = Color.LightGray,
+                            strokeWidth = 3.dp
+                        )
+                    }
                 }
             }
         }

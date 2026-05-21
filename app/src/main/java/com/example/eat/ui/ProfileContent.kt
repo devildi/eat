@@ -412,13 +412,16 @@ fun ProfileContent(
                     } else {
                         "$hour:30"
                     }
+                    val nextHourKey = if (minute < 30) "$hour:30" else "${hour + 1}:00"
                     val baseY = layoutData.hourYPositions[hourKey]!!
+                    val nextY = layoutData.hourYPositions[nextHourKey]
+                    val actualSegmentHeightPx = if (nextY != null) nextY - baseY else layoutData.activeHeightPx
                     val minuteInSegment = if (minute < 30) minute else minute - 30
-                    val offset = (minuteInSegment / 30f) * layoutData.activeHeightPx
+                    val offset = (minuteInSegment / 30f) * actualSegmentHeightPx
                     val eventY = baseY + offset
 
                     val isMainMeal = event.type == "Main Meal"
-                    
+
                     // Calculate dynamic gap: 40dp base, minus 10dp for each overlapping item
                     val numItems = if (event.imagePaths.isNotEmpty()) event.imagePaths.size else event.colorIndices.size
                     val overlapCount = (numItems - 1).coerceAtLeast(0)
@@ -445,122 +448,68 @@ fun ProfileContent(
                 val hour = SimpleDateFormat("H", Locale.getDefault()).format(date).toInt()
                 val minute = SimpleDateFormat("m", Locale.getDefault()).format(date).toInt()
                 val hourKey = if (minute < 30) "$hour:00" else "$hour:30"
+                val nextHourKey = if (minute < 30) "$hour:30" else "${hour + 1}:00"
                 val baseY = layoutData.hourYPositions[hourKey]!!
+                val nextY = layoutData.hourYPositions[nextHourKey]
+                val actualSegmentHeightPx = if (nextY != null) nextY - baseY else layoutData.activeHeightPx
                 val minuteInSegment = if (minute < 30) minute else minute - 30
-                val offset = (minuteInSegment / 30f) * layoutData.activeHeightPx
+                val offset = (minuteInSegment / 30f) * actualSegmentHeightPx
                 val eventY = baseY + offset
                 val numItems = if (event.imagePaths.isNotEmpty()) event.imagePaths.size else event.colorIndices.size
                 val isMainMeal = event.type == "Main Meal"
-                
-                // Calculate dynamic gap: 40dp base, minus 10dp for each overlapping item
-                // Overlap count is numItems - 1
+
                 val overlapCount = (numItems - 1).coerceAtLeast(0)
                 val symmetricGapDp = (40 - (overlapCount * 10)).coerceAtLeast(0).dp
-                val symmetricGapPx = with(density) { symmetricGapDp.toPx() }
-                
-                val availableWidthPx = (containerWidthPx / 2f) - symmetricGapPx
-                val availableWidthDp = with(density) { availableWidthPx.toDp() }
-                
+
                 val circleDiameterDp = 30.dp
                 val overlapOffsetDp = 15.dp
                 val circlesWidthDp = ((numItems - 1) * 15 + 30).dp
 
-                Box(
+                Row(
                     modifier = Modifier
-                        .offset(
-                            x = with(density) {
-                                if (isMainMeal) {
-                                    val boxRightEdgePx = containerWidthPx / 2f - symmetricGapPx
-                                    (boxRightEdgePx - availableWidthPx).toDp()
-                                } else {
-                                    (containerWidthPx / 2f + symmetricGapPx).toDp()
-                                }
-                            },
-                            y = with(density) { (eventY - (circleDiameterDp / 2).toPx()).toDp() }
-                        )
-                        .width(availableWidthDp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .offset(y = with(density) { (eventY - (circleDiameterDp / 2).toPx()).toDp() })
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = if (isMainMeal) Arrangement.End else Arrangement.Start
-                    ) {
-                        Box(
-                             modifier = Modifier
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                                .clickable {
-                                    selectedEvent = event
-                                    showEventDetail = true
-                                }
-                                .background(Color(0xFFE0F7FA)) // Light Blue
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                    if (isMainMeal) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (isMainMeal) {
-                                    val displayText = if (numItems >= 4) {
-                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
-                                    } else {
-                                        "正餐 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
-                                    }
-                                    Text(
-                                        text = displayText,
-                                        style = TextStyle(fontSize = 14.sp, color = Color.Gray),
-                                        modifier = Modifier.padding(end = 8.dp),
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                                Box(modifier = Modifier.size(width = circlesWidthDp, height = circleDiameterDp)) {
-                                    if (event.imagePaths.isNotEmpty()) {
-                                        event.imagePaths.forEachIndexed { index, path ->
-                                            // Load thumbnail (30dp circle = ~90px on most devices)
-                                            val bitmap = remember(path) { com.example.eat.utils.ImageUtils.loadRotatedBitmap(path, 200) }
-                                            if (bitmap != null) {
-                                                Image(
-                                                    bitmap = bitmap.asImageBitmap(),
-                                                    contentDescription = "Event Photo",
-                                                    contentScale = ContentScale.Crop,
-                                                    modifier = Modifier
-                                                        .size(circleDiameterDp)
-                                                        .offset(x = overlapOffsetDp * index)
-                                                        .clip(CircleShape)
-                                                        .border(1.dp, Color.White, CircleShape)
-                                                )
-                                            }
-                                        }
-                                    } else {
-                                        event.colorIndices.forEachIndexed { index, colorIndex ->
-                                            val markerColor = when (colorIndex) {
-                                                0 -> Color.Red
-                                                1 -> Color.Yellow
-                                                2 -> Color.Blue
-                                                else -> Color.Red
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(circleDiameterDp)
-                                                    .offset(x = overlapOffsetDp * index)
-                                                    .background(markerColor, CircleShape)
-                                                    .border(1.dp, Color.White, CircleShape)
-                                            )
-                                        }
-                                    }
-                                }
-                                if (!isMainMeal) {
-                                    val displayText = if (numItems >= 4) {
-                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
-                                    } else {
-                                        "零食 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
-                                    }
-                                    Text(
-                                        text = displayText,
-                                        style = TextStyle(fontSize = 14.sp, color = Color.Gray),
-                                        modifier = Modifier.padding(start = 8.dp),
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                            }
+                            eventCard(
+                                event = event,
+                                isMainMeal = true,
+                                circlesWidthDp = circlesWidthDp,
+                                circleDiameterDp = circleDiameterDp,
+                                overlapOffsetDp = overlapOffsetDp,
+                                numItems = numItems,
+                                showEventDetail = { selectedEvent = event; showEventDetail = true }
+                            )
+                            Spacer(modifier = Modifier.width(symmetricGapDp))
                         }
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                    if (!isMainMeal) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.Start,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Spacer(modifier = Modifier.width(symmetricGapDp))
+                            eventCard(
+                                event = event,
+                                isMainMeal = false,
+                                circlesWidthDp = circlesWidthDp,
+                                circleDiameterDp = circleDiameterDp,
+                                overlapOffsetDp = overlapOffsetDp,
+                                numItems = numItems,
+                                showEventDetail = { selectedEvent = event; showEventDetail = true }
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
 
@@ -812,5 +761,96 @@ fun ProfileContent(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun eventCard(
+    event: Event,
+    isMainMeal: Boolean,
+    circlesWidthDp: Dp,
+    circleDiameterDp: Dp,
+    overlapOffsetDp: Dp,
+    numItems: Int,
+    showEventDetail: () -> Unit
+) {
+    val date = java.util.Date(event.latestTimestamp)
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { showEventDetail() }
+            .background(Color(0xFFE0F7FA))
+            .padding(
+                start = if (isMainMeal) 8.dp else 0.dp,
+                end = if (isMainMeal) 0.dp else 8.dp,
+                top = 4.dp,
+                bottom = 4.dp
+            )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (isMainMeal) {
+                val displayText = if (numItems >= 4) {
+                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
+                } else {
+                    "正餐 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
+                }
+                Text(
+                    text = displayText,
+                    style = TextStyle(fontSize = 14.sp, color = Color.Gray),
+                    modifier = Modifier.padding(end = 8.dp),
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+            Box(modifier = Modifier.size(width = circlesWidthDp, height = circleDiameterDp)) {
+                if (event.imagePaths.isNotEmpty()) {
+                    event.imagePaths.forEachIndexed { index, path ->
+                        val bitmap = remember(path) { com.example.eat.utils.ImageUtils.loadRotatedBitmap(path, 200) }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Event Photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(circleDiameterDp)
+                                    .offset(x = overlapOffsetDp * index)
+                                    .clip(CircleShape)
+                                    .border(1.dp, Color.White, CircleShape)
+                            )
+                        }
+                    }
+                } else {
+                    event.colorIndices.forEachIndexed { index, colorIndex ->
+                        val markerColor = when (colorIndex) {
+                            0 -> Color.Red
+                            1 -> Color.Yellow
+                            2 -> Color.Blue
+                            else -> Color.Red
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(circleDiameterDp)
+                                .offset(x = overlapOffsetDp * index)
+                                .background(markerColor, CircleShape)
+                                .border(1.dp, Color.White, CircleShape)
+                        )
+                    }
+                }
+            }
+            if (!isMainMeal) {
+                val displayText = if (numItems >= 4) {
+                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
+                } else {
+                    "零食 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
+                }
+                Text(
+                    text = displayText,
+                    style = TextStyle(fontSize = 14.sp, color = Color.Gray),
+                    modifier = Modifier.padding(start = 8.dp),
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
     }
 }

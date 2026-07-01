@@ -1,12 +1,8 @@
 package com.example.eat.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateValue
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
-import androidx.compose.animation.core.VectorConverter
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -14,20 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -37,66 +20,29 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.ImageBitmap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.roundToInt
-
-// Data class to hold cached layout calculations
-private data class LayoutData(
-    val hasData: Boolean,
-    val keyHours: Set<String>, // Changed to String to support "9.0", "9.5" format
-    val activeHours: Set<Int>,
-    val hourYPositions: Map<String, Float>, // Changed to String keys
-    val activeHeightPx: Float,
-    val totalHeightDp: Dp,
-    val sortedKeyHours: List<String> // Changed to String
-)
+import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -106,423 +52,496 @@ fun ProfileContent(
     onDateChange: (Long) -> Unit
 ) {
     val scrollState = rememberScrollState()
-    val textMeasurer = rememberTextMeasurer()
-    val context = LocalContext.current
-
-    // Collect events from ViewModel based on selected date
+    // Collect data from ViewModel
     val events by viewModel.getEventsByDate(selectedDate).collectAsState(initial = null)
+    val weightData by viewModel.weightData.collectAsState()
+    val bloodPressureData by viewModel.bloodPressureData.collectAsState()
     
-    // Show toast when date changes and there's no data
-    androidx.compose.runtime.LaunchedEffect(selectedDate) {
-        scrollState.scrollTo(0)
-        // Wait a bit for the data to load
-        kotlinx.coroutines.delay(100)
-        if (events != null && events!!.isEmpty()) {
-            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-            val selectedDateString = dateFormat.format(java.util.Date(selectedDate))
-            val todayString = dateFormat.format(java.util.Date())
-            
-            if (selectedDateString != todayString) {
-                android.widget.Toast.makeText(context, "${selectedDateString}无数据", android.widget.Toast.LENGTH_SHORT).show()
-            }
-        }
+    // Find logs specifically for the selected date
+    val weightForDate = remember(weightData, selectedDate) {
+        weightData.filter { entity ->
+            val calendar = Calendar.getInstance()
+            calendar.timeInMillis = entity.timestamp
+            val dateCal = Calendar.getInstance().apply { timeInMillis = selectedDate }
+            calendar.get(Calendar.YEAR) == dateCal.get(Calendar.YEAR) &&
+            calendar.get(Calendar.DAY_OF_YEAR) == dateCal.get(Calendar.DAY_OF_YEAR)
+        }.maxByOrNull { it.timestamp }
+    }
+    
+    val bpForDate = remember(bloodPressureData, selectedDate) {
+        bloodPressureData.filter { entity ->
+            val calendar = Calendar.getInstance()
+            calendar.timeInMillis = entity.timestamp
+            val dateCal = Calendar.getInstance().apply { timeInMillis = selectedDate }
+            calendar.get(Calendar.YEAR) == dateCal.get(Calendar.YEAR) &&
+            calendar.get(Calendar.DAY_OF_YEAR) == dateCal.get(Calendar.DAY_OF_YEAR)
+        }.maxByOrNull { it.timestamp }
     }
 
-    // Health Data Dialog State
+    // Health Data Dialog States
     var showHealthDialog by remember { mutableStateOf(false) }
     var highPressure by remember { mutableStateOf("") }
     var lowPressure by remember { mutableStateOf("") }
     var weight by remember { mutableStateOf("") }
+    
     var showDeleteDialog by remember { mutableStateOf(false) }
     var imagePathToDelete by remember { mutableStateOf<String?>(null) }
     var showClearAllDialog by remember { mutableStateOf(false) }
 
-    // Hero Animation State
+    // Detail View Dialog States
     var selectedEvent by remember { mutableStateOf<Event?>(null) }
     var showEventDetail by remember { mutableStateOf(false) }
 
     val currentEvents = events
 
-
-    Scaffold(
-        floatingActionButton = {
-            androidx.compose.material3.Surface(
+    Scaffold { paddingValues ->
+            var dragOffset by remember { mutableStateOf(0f) }
+            
+            Box(
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .combinedClickable(
-                        onClick = { showHealthDialog = true },
-                        onLongClick = { showClearAllDialog = true }
-                    ),
-                color = Color.Black,
-                contentColor = Color.White,
-                shape = RoundedCornerShape(16.dp),
-                shadowElevation = 6.dp
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Health Data")
-                }
-            }
-        }
-    ) { paddingValues ->
-        var dragOffset by remember { mutableStateOf(0f) }
-        
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .pointerInput(selectedDate) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            if (kotlin.math.abs(dragOffset) > 100f) {
-                                val calendar = java.util.Calendar.getInstance()
-                                calendar.timeInMillis = selectedDate
-                                
-                                if (dragOffset > 0) {
-                                    // Swipe Right -> Previous Day
-                                    calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
-                                    onDateChange(calendar.timeInMillis)
-                                } else {
-                                    // Swipe Left -> Next Day
-                                    calendar.add(java.util.Calendar.DAY_OF_YEAR, 1)
-                                    onDateChange(calendar.timeInMillis)
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .pointerInput(selectedDate) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (kotlin.math.abs(dragOffset) > 100f) {
+                                    val calendar = Calendar.getInstance()
+                                    calendar.timeInMillis = selectedDate
+                                    
+                                    if (dragOffset > 0) {
+                                        // Swipe Right -> Previous Day
+                                        calendar.add(Calendar.DAY_OF_YEAR, -1)
+                                        onDateChange(calendar.timeInMillis)
+                                    } else {
+                                        // Swipe Left -> Next Day
+                                        calendar.add(Calendar.DAY_OF_YEAR, 1)
+                                        onDateChange(calendar.timeInMillis)
+                                    }
                                 }
+                                dragOffset = 0f
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                dragOffset += dragAmount
                             }
-                            dragOffset = 0f
-                        },
-                        onHorizontalDrag = { _, dragAmount ->
-                            dragOffset += dragAmount
-                        }
-                    )
-                }
-        ) {
-            if (currentEvents == null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    androidx.compose.material3.CircularProgressIndicator()
-                }
-            } else {
-                val density = androidx.compose.ui.platform.LocalDensity.current
-                // Optimize: Cache expensive layout calculations
-                val layoutData = remember(currentEvents, density) {
-                    val keyHours = mutableSetOf<String>()
-                    val activeHours = mutableSetOf<Int>()
-                    val hourYPositions = mutableMapOf<String, Float>()
-                    val activeHeightPx = with(density) { 90.dp.toPx() }
-            
-                    var currentY = 50f // startY
-            
-                    if (currentEvents.isEmpty()) {
-                        // Empty State: 3-hour intervals, 80dp spacing
-                        val step = 3
-                        val spacingPx = with(density) { 80.dp.toPx() }
-            
-                        for (h in 0..24 step step) {
-                            val key = "$h:00"
-                            keyHours.add(key)
-                            hourYPositions[key] = currentY
-                            if (h < 24) {
-                                currentY += spacingPx
+                        )
+                    }
+            ) {
+                if (currentEvents == null) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Color.Black)
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFFF7F9FA))
+                            .verticalScroll(scrollState)
+                    ) {
+                        // 1. Dashboard Header Card
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = { showClearAllDialog = true }
+                                ),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .background(Color(0xFFE0F2F1), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "ME",
+                                    style = TextStyle(
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF00796B)
+                                    )
+                                )
                             }
-                        }
-                    } else {
-                        // Dynamic State: Based on events with 30-minute intervals
-                        val activeHalfHours = mutableSetOf<String>()
-            
-                        // Reuse SimpleDateFormat instance
-                        val hourFormat = SimpleDateFormat("H", Locale.getDefault())
-                        val minuteFormat = SimpleDateFormat("m", Locale.getDefault())
-            
-                        currentEvents.forEach { event ->
-                            val date = Date(event.latestTimestamp)
-                            val hour = hourFormat.format(date).toInt()
-                            val minute = minuteFormat.format(date).toInt()
-            
-                            // Determine which 30-minute segment this event falls into
-                            val halfHourKey = if (minute < 30) {
-                                "$hour:00"
-                            } else {
-                                "$hour:30"
-                            }
-                            activeHalfHours.add(halfHourKey)
-                            activeHours.add(hour)
-                        }
-            
-                        // Generate 30-minute interval marks around active segments
-                        activeHalfHours.forEach { halfHourKey ->
-                            val parts = halfHourKey.split(":")
-                            val hour = parts[0].toInt()
-                            val isOnHour = parts[1] == "00"
-            
-                            if (isOnHour) {
-                                // Event in :00-:29, add marks at hour:00 and hour:30
-                                keyHours.add("$hour:00")
-                                keyHours.add("$hour:30")
-                            } else {
-                                // Event in :30-:59, add marks at hour:30 and (hour+1):00
-                                keyHours.add("$hour:30")
-                                keyHours.add("${hour + 1}:00")
-                            }
-                        }
-            
-                        // Also add 0:00 and 24:00
-                        keyHours.add("0:00")
-                        keyHours.add("24:00")
-            
-                        // Sort keys properly
-                        val sortedKeyHours = keyHours.toList().sortedWith(compareBy(
-                            { it.split(":")[0].toInt() },
-                            { it.split(":")[1].toInt() }
-                        ))
-            
-                        val activeSegmentPx = with(density) { 200.dp.toPx() } // Active segment spacing (changed to 200dp)
-                        val inactiveSegmentPx = with(density) { 50.dp.toPx() }
-            
-                        sortedKeyHours.forEachIndexed { index, hourMark ->
-                            hourYPositions[hourMark] = currentY
-            
-                            if (index < sortedKeyHours.size - 1) {
-                                // Check if this segment is active
-                                val isActive = activeHalfHours.contains(hourMark)
-                                val segmentHeight = if (isActive) activeSegmentPx else inactiveSegmentPx
-                                currentY += segmentHeight
+                            Column {
+                                Text(
+                                    text = "我的健康档案",
+                                    style = TextStyle(
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black
+                                    )
+                                )
+                                Text(
+                                    text = "记录今日，管理健康",
+                                    style = TextStyle(
+                                        fontSize = 13.sp,
+                                        color = Color.Gray
+                                    )
+                                )
                             }
                         }
                     }
-            
-                    val totalHeightPx = currentY + with(density) { 50.dp.toPx() } // Add bottom padding
-                    val totalHeightDp = with(density) { totalHeightPx.toDp() }
-                    val sortedKeyHours = keyHours.toList().sortedWith(compareBy(
-                        { it.split(":")[0].toInt() },
-                        { it.split(":")[1].toInt() }
-                    ))
-            
-                    LayoutData(
-                        hasData = currentEvents.isNotEmpty(),
-                        keyHours = keyHours,
-                        activeHours = activeHours,
-                        hourYPositions = hourYPositions,
-                        activeHeightPx = activeHeightPx,
-                        totalHeightDp = totalHeightDp,
-                        sortedKeyHours = sortedKeyHours
-                    )
-                }
 
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(scrollState)
-                ) {
-                    val containerWidth = maxWidth
-                    val containerWidthPx = with(density) { containerWidth.toPx() }
+                    // 2. Health Stats Summary Cards (Weight, BP, Meals)
+                    val mealsCount = remember(currentEvents) { currentEvents.count { it.type == "Main Meal" } }
+                    val snacksCount = remember(currentEvents) { currentEvents.count { it.type == "Snack" } }
 
-                    Canvas(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(layoutData.totalHeightDp)
-                            .padding(horizontal = 16.dp)
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        val centerX = size.width / 2
-
-                        // 3. Render Timeline Segments
-                        layoutData.sortedKeyHours.forEachIndexed { index, hour ->
-                            // ... (Existing Canvas Drawing Code)
-
-                    val startY = layoutData.hourYPositions[hour]!!
-
-                    // Draw Marker (Circle + Text)
-                    drawCircle(
-                        color = Color.Black,
-                        radius = 8f,
-                        center = Offset(centerX, startY)
-                    )
-
-                    // Draw Hour Text
-                    val timeText = hour
-                    val textLayoutResult = textMeasurer.measure(
-                        text = timeText,
-                        style = TextStyle(
-                            fontSize = 16.sp,
-                            color = Color.Black
-                        )
-                    )
-                    drawText(
-                        textLayoutResult = textLayoutResult,
-                        topLeft = Offset(
-                            centerX + 50f,
-                            startY - textLayoutResult.size.height / 2
-                        )
-                    )
-
-                    // Draw Line to Next Marker
-                    if (index < layoutData.sortedKeyHours.size - 1) {
-                        val nextHour = layoutData.sortedKeyHours[index + 1]
-                        val endY = layoutData.hourYPositions[nextHour]!!
-
-                        // Determine line style
-                        val isSolid = if (!layoutData.hasData) {
-                            true // Empty state always solid
-                        } else {
-                            // Dynamic state: solid if this is an active segment
-                            // Check if current hour mark is in the active segments
-                            val hourParts = hour.split(":")
-                            val nextHourParts = nextHour.split(":")
-                            val currentHourInt = hourParts[0].toInt()
-                            val currentMinute = hourParts[1].toInt()
-                            val nextHourInt = nextHourParts[0].toInt()
-                            val nextMinute = nextHourParts[1].toInt()
-
-                            // Check if they are consecutive 30-minute marks
-                            val isConsecutive = (currentHourInt == nextHourInt && currentMinute == 0 && nextMinute == 30) ||
-                                               (currentHourInt + 1 == nextHourInt && currentMinute == 30 && nextMinute == 0)
-
-                            isConsecutive && layoutData.activeHours.contains(currentHourInt)
-                        }
-
-                        if (isSolid) {
-                            // Solid Line
-                            drawLine(
-                                color = Color.Black,
-                                start = Offset(centerX, startY),
-                                end = Offset(centerX, endY),
-                                strokeWidth = 4f
-                            )
-                        } else {
-                            // Dashed Line
-                            val pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(20f, 20f), 0f)
-                            drawLine(
-                                color = Color.Black,
-                                start = Offset(centerX, startY),
-                                end = Offset(centerX, endY),
-                                strokeWidth = 4f,
-                                pathEffect = pathEffect
-                            )
-                        }
-                    }
-                }
-
-                // 4. Render Events
-                for (event in currentEvents) {
-                    val date = Date(event.latestTimestamp)
-                    val hour = SimpleDateFormat("H", Locale.getDefault()).format(date).toInt()
-                    val minute = SimpleDateFormat("m", Locale.getDefault()).format(date).toInt()
-
-                    // Calculate Y position
-                    val hourKey = if (minute < 30) {
-                        "$hour:00"
-                    } else {
-                        "$hour:30"
-                    }
-                    val nextHourKey = if (minute < 30) "$hour:30" else "${hour + 1}:00"
-                    val baseY = layoutData.hourYPositions[hourKey]!!
-                    val nextY = layoutData.hourYPositions[nextHourKey]
-                    val actualSegmentHeightPx = if (nextY != null) nextY - baseY else layoutData.activeHeightPx
-                    val minuteInSegment = if (minute < 30) minute else minute - 30
-                    val offset = (minuteInSegment / 30f) * actualSegmentHeightPx
-                    val eventY = baseY + offset
-
-                    val isMainMeal = event.type == "Main Meal"
-
-                    // Calculate dynamic gap: 40dp base, minus 10dp for each overlapping item
-                    val numItems = if (event.imagePaths.isNotEmpty()) event.imagePaths.size else event.colorIndices.size
-                    val overlapCount = (numItems - 1).coerceAtLeast(0)
-                    val symmetricGapDp = (40 - (overlapCount * 10)).coerceAtLeast(0).dp
-                    val symmetricGapPx = with(density) { symmetricGapDp.toPx() }
-
-                    // The x-coordinate where the connecting line meets the timeline side of the data container.
-                    val lineConnectX = if (isMainMeal) centerX - symmetricGapPx else centerX + symmetricGapPx
-
-                    // Draw connecting line
-                    drawLine(
-                        color = Color.Gray,
-                        start = Offset(lineConnectX, eventY),
-                        end = Offset(centerX, eventY),
-                        strokeWidth = 2f
-                    )
-                }
-
-                }
-
-            // Render Events (Composables)
-            currentEvents.forEach { event ->
-                val date = Date(event.latestTimestamp)
-                val hour = SimpleDateFormat("H", Locale.getDefault()).format(date).toInt()
-                val minute = SimpleDateFormat("m", Locale.getDefault()).format(date).toInt()
-                val hourKey = if (minute < 30) "$hour:00" else "$hour:30"
-                val nextHourKey = if (minute < 30) "$hour:30" else "${hour + 1}:00"
-                val baseY = layoutData.hourYPositions[hourKey]!!
-                val nextY = layoutData.hourYPositions[nextHourKey]
-                val actualSegmentHeightPx = if (nextY != null) nextY - baseY else layoutData.activeHeightPx
-                val minuteInSegment = if (minute < 30) minute else minute - 30
-                val offset = (minuteInSegment / 30f) * actualSegmentHeightPx
-                val eventY = baseY + offset
-                val numItems = if (event.imagePaths.isNotEmpty()) event.imagePaths.size else event.colorIndices.size
-                val isMainMeal = event.type == "Main Meal"
-
-                val overlapCount = (numItems - 1).coerceAtLeast(0)
-                val symmetricGapDp = (40 - (overlapCount * 10)).coerceAtLeast(0).dp
-
-                val circleDiameterDp = 30.dp
-                val overlapOffsetDp = 15.dp
-                val circlesWidthDp = ((numItems - 1) * 15 + 30).dp
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .offset(y = with(density) { (eventY - (circleDiameterDp / 2).toPx()).toDp() })
-                ) {
-                    if (isMainMeal) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { showHealthDialog = true },
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                            shape = RoundedCornerShape(16.dp)
                         ) {
-                            eventCard(
-                                event = event,
-                                isMainMeal = true,
-                                circlesWidthDp = circlesWidthDp,
-                                circleDiameterDp = circleDiameterDp,
-                                overlapOffsetDp = overlapOffsetDp,
-                                numItems = numItems,
-                                showEventDetail = { selectedEvent = event; showEventDetail = true }
-                            )
-                            Spacer(modifier = Modifier.width(symmetricGapDp))
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(text = "体重", style = TextStyle(fontSize = 12.sp, color = Color.Gray))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                if (weightForDate != null) {
+                                    Text(
+                                        text = "${String.format("%.1f", weightForDate.value1 * 2f)} 斤",
+                                        style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                    )
+                                    Text(
+                                        text = "${String.format("%.1f", weightForDate.value1)} kg",
+                                        style = TextStyle(fontSize = 11.sp, color = Color.Gray)
+                                    )
+                                } else {
+                                    Text(
+                                        text = "去记录",
+                                        style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00796B))
+                                    )
+                                    Spacer(modifier = Modifier.height(18.dp))
+                                }
+                            }
                         }
-                    } else {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                    if (!isMainMeal) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.Start,
-                            verticalAlignment = Alignment.CenterVertically
+
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { showHealthDialog = true },
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                            shape = RoundedCornerShape(16.dp)
                         ) {
-                            Spacer(modifier = Modifier.width(symmetricGapDp))
-                            eventCard(
-                                event = event,
-                                isMainMeal = false,
-                                circlesWidthDp = circlesWidthDp,
-                                circleDiameterDp = circleDiameterDp,
-                                overlapOffsetDp = overlapOffsetDp,
-                                numItems = numItems,
-                                showEventDetail = { selectedEvent = event; showEventDetail = true }
-                            )
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(text = "血压", style = TextStyle(fontSize = 12.sp, color = Color.Gray))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                if (bpForDate != null) {
+                                    Text(
+                                        text = "${bpForDate.value1.toInt()}/${bpForDate.value2?.toInt() ?: 0}",
+                                        style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                    )
+                                    Text(
+                                        text = "mmHg",
+                                        style = TextStyle(fontSize = 11.sp, color = Color.Gray)
+                                    )
+                                } else {
+                                    Text(
+                                        text = "去记录",
+                                        style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00796B))
+                                    )
+                                    Spacer(modifier = Modifier.height(18.dp))
+                                }
+                            }
+                        }
+
+                        Card(
+                            modifier = Modifier.weight(1f),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(text = "饮食统计", style = TextStyle(fontSize = 12.sp, color = Color.Gray))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "$mealsCount 正餐",
+                                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD84315))
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "$snacksCount 零食",
+                                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF8F00))
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. Weekly Horizontal Calendar Strip
+                    val calendarStripDays = remember(selectedDate) {
+                        val list = mutableListOf<Date>()
+                        val cal = Calendar.getInstance()
+                        cal.timeInMillis = selectedDate
+                        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+                        val offset = if (dayOfWeek == Calendar.SUNDAY) -6 else 2 - dayOfWeek
+                        cal.add(Calendar.DAY_OF_YEAR, offset)
+                        for (i in 0..6) {
+                            list.add(cal.time)
+                            cal.add(Calendar.DAY_OF_YEAR, 1)
+                        }
+                        list
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        calendarStripDays.forEach { date ->
+                            val cal = Calendar.getInstance().apply { time = date }
+                            val dayNum = cal.get(Calendar.DAY_OF_MONTH)
+                            val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+                            val dayOfWeekStr = when (dayOfWeek) {
+                                Calendar.MONDAY -> "一"
+                                Calendar.TUESDAY -> "二"
+                                Calendar.WEDNESDAY -> "三"
+                                Calendar.THURSDAY -> "四"
+                                Calendar.FRIDAY -> "五"
+                                Calendar.SATURDAY -> "六"
+                                Calendar.SUNDAY -> "日"
+                                else -> ""
+                            }
+                            
+                            val isSelected = remember(selectedDate, date) {
+                                val sCal = Calendar.getInstance().apply { timeInMillis = selectedDate }
+                                sCal.get(Calendar.YEAR) == cal.get(Calendar.YEAR) &&
+                                sCal.get(Calendar.DAY_OF_YEAR) == cal.get(Calendar.DAY_OF_YEAR)
+                            }
+                            
+                            val isFuture = date.time > System.currentTimeMillis() && !isToday(date)
+                            
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) Color.Black else Color.Transparent)
+                                    .clickable(enabled = !isFuture) {
+                                        onDateChange(date.time)
+                                    }
+                                    .padding(vertical = 8.dp, horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = dayOfWeekStr,
+                                    style = TextStyle(
+                                        fontSize = 11.sp,
+                                        color = if (isSelected) Color.White.copy(alpha = 0.8f) else if (isFuture) Color.LightGray else Color.Gray,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = dayNum.toString(),
+                                    style = TextStyle(
+                                        fontSize = 15.sp,
+                                        color = if (isSelected) Color.White else if (isFuture) Color.LightGray else Color.Black,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Divider title
+                    Text(
+                        text = "今日时间线",
+                        style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Gray),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+
+                    // 4. Daily Timeline Section
+                    if (currentEvents.isEmpty()) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "今天还没有任何饮食记录哦",
+                                    style = TextStyle(fontSize = 15.sp, color = Color.Gray)
+                                )
+                            }
                         }
                     } else {
-                        Spacer(modifier = Modifier.weight(1f))
+                        val sortedEvents = remember(currentEvents) { currentEvents.sortedBy { it.latestTimestamp } }
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            sortedEvents.forEachIndexed { index, event ->
+                                val isFirst = index == 0
+                                val isLast = index == sortedEvents.size - 1
+                                val date = Date(event.latestTimestamp)
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    // Left side: Timeline Line and Node
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.width(24.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(2.dp)
+                                                .height(16.dp)
+                                                .background(if (isFirst) Color.Transparent else Color(0xFFB0BEC5))
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .background(if (event.type == "Main Meal") Color(0xFFD84315) else Color(0xFFFF8F00), CircleShape)
+                                                .border(2.dp, Color.White, CircleShape)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .width(2.dp)
+                                                .height(if (isLast) 32.dp else 100.dp) // Provide spacing
+                                                .background(if (isLast) Color.Transparent else Color(0xFFB0BEC5))
+                                        )
+                                    }
+                                    
+                                    // Right side: Diet Card
+                                    Card(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(bottom = 16.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .clickable { 
+                                                selectedEvent = event
+                                                showEventDetail = true 
+                                            },
+                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(if (event.type == "Main Meal") Color(0xFFFBE9E7) else Color(0xFFFFF8E1))
+                                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = if (event.type == "Main Meal") "正餐" else "零食",
+                                                            color = if (event.type == "Main Meal") Color(0xFFD84315) else Color(0xFFFF8F00),
+                                                            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(date),
+                                                        style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color.Gray)
+                                                    )
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            
+                                            if (event.imagePaths.isNotEmpty()) {
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    event.imagePaths.forEach { path ->
+                                                        val bitmap = remember(path) { com.example.eat.utils.ImageUtils.loadRotatedBitmap(path, 200) }
+                                                        if (bitmap != null) {
+                                                            Image(
+                                                                bitmap = bitmap.asImageBitmap(),
+                                                                contentDescription = "Food Photo",
+                                                                contentScale = ContentScale.Crop,
+                                                                modifier = Modifier
+                                                                    .size(64.dp)
+                                                                    .clip(RoundedCornerShape(12.dp))
+                                                                    .border(1.dp, Color(0xFFECEFF1), RoundedCornerShape(12.dp))
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    event.colorIndices.forEach { colorIndex ->
+                                                        val markerColor = when (colorIndex) {
+                                                            0 -> Color.Red
+                                                            1 -> Color.Yellow
+                                                            2 -> Color.Blue
+                                                            else -> Color.Red
+                                                        }
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(10.dp)
+                                                                .background(markerColor, CircleShape)
+                                                                .border(1.dp, Color.White, CircleShape)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = "无图片记录",
+                                                        style = TextStyle(fontSize = 12.sp, color = Color.LightGray)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(40.dp))
                     }
                 }
-
-    }
             }
         }
     }
-}
 
+    // A. Add Health Data Dialog
     if (showHealthDialog) {
         AlertDialog(
             onDismissRequest = { showHealthDialog = false },
-            title = { Text("添加健康数据") },
+            title = { 
+                Text(
+                    text = "添加健康数据", 
+                    style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                ) 
+            },
             text = {
                 Column {
                     OutlinedTextField(
@@ -551,13 +570,12 @@ fun ProfileContent(
                 }
             },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
                         if (highPressure.isNotEmpty() && lowPressure.isNotEmpty()) {
                             viewModel.saveBloodPressure(highPressure.toFloatOrNull() ?: 0f, lowPressure.toFloatOrNull() ?: 0f)
                         }
                         if (weight.isNotEmpty()) {
-                            // Convert jin to kg for storage (1 jin = 0.5 kg)
                             val weightInJin = weight.toFloatOrNull() ?: 0f
                             val weightInKg = weightInJin * 0.5f
                             viewModel.saveWeight(weightInKg)
@@ -566,181 +584,199 @@ fun ProfileContent(
                         lowPressure = ""
                         weight = ""
                         showHealthDialog = false
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
                 ) {
                     Text("保存")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showHealthDialog = false }) {
+                TextButton(
+                    onClick = { showHealthDialog = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
+                ) {
                     Text("取消")
                 }
-            }
+            },
+            shape = RoundedCornerShape(24.dp)
         )
     }
 
+    // B. Clear All Data Confirmation Dialog
     if (showClearAllDialog) {
         AlertDialog(
             onDismissRequest = { showClearAllDialog = false },
-            title = { Text("删除所有数据") },
-            text = { Text("确定要删除所有事件和健康数据吗？此操作无法撤销。") },
+            title = { Text("删除所有数据", style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold)) },
+            text = { Text("确定要删除所有饮食事件和健康数据吗？此操作无法撤销。") },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
                         viewModel.deleteAllData()
                         showClearAllDialog = false
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
                 ) {
-                    Text("删除", color = Color.Red)
+                    Text("全部删除")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearAllDialog = false }) {
+                TextButton(
+                    onClick = { showClearAllDialog = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
+                ) {
                     Text("取消")
                 }
-            }
+            },
+            shape = RoundedCornerShape(24.dp)
         )
     }
 
-    // Delete Confirmation Dialog
-
+    // C. Event Details Full screen Dialog
     if (showEventDetail && selectedEvent != null) {
         AlertDialog(
             onDismissRequest = { showEventDetail = false },
-            title = { 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val titleText = if (selectedEvent!!.type == "Main Meal") "正餐" else "零食"
-                    Text(titleText)
-                    
-                    if (selectedEvent!!.type == "Main Meal") {
-                        TextButton(
-                            onClick = {
-                                viewModel.updateEventCategory(selectedEvent!!.timestamps, "Snack")
-                                showEventDetail = false
-                            }
-                        ) {
-                            Text("改为零食")
+            title = null,
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = if (selectedEvent!!.type == "Main Meal") "正餐记录" else "零食记录",
+                                style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            )
+                            Text(
+                                text = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(selectedEvent!!.latestTimestamp)),
+                                style = TextStyle(fontSize = 12.sp, color = Color.Gray)
+                            )
                         }
-                    } else if (selectedEvent!!.type == "Snack") {
-                         TextButton(
-                            onClick = {
-                                viewModel.updateEventCategory(selectedEvent!!.timestamps, "Main Meal")
-                                showEventDetail = false
-                            }
-                        ) {
-                            Text("改为正餐")
+                        IconButton(onClick = { showEventDetail = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
                         }
                     }
-                }
-            },
-            text = {
-                Column {
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
                     if (selectedEvent!!.imagePaths.isNotEmpty()) {
                         val pagerState = rememberPagerState(pageCount = { selectedEvent!!.imagePaths.size })
                         
-                        // Display timestamp for current page
-                        val currentTimestamp = selectedEvent!!.timestamps.getOrNull(pagerState.currentPage) ?: selectedEvent!!.latestTimestamp
-                        Text("时间: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(currentTimestamp))}")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth()) { page ->
-                            val path = selectedEvent!!.imagePaths[page]
-                            
-                            // Load image asynchronously to avoid blocking the main thread
-                            val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, key1 = path) {
-                                value = withContext(Dispatchers.IO) {
-                                    com.example.eat.utils.ImageUtils.loadRotatedBitmap(path)
-                                }
-                            }
-
-                            // Fixed-size placeholder box with 3:4 aspect ratio
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(3f / 4f) // Width:Height = 3:4
-                                    .background(Color(0xFFF5F5F5)) // Light gray placeholder
-                            ) {
-                                // Display image with fade-in animation when loaded
-                                androidx.compose.animation.AnimatedVisibility(
-                                    visible = bitmap != null,
-                                    enter = androidx.compose.animation.fadeIn(
-                                        animationSpec = tween(durationMillis = 300)
-                                    ),
-                                    exit = androidx.compose.animation.fadeOut(
-                                        animationSpec = tween(durationMillis = 300)
-                                    )
-                                ) {
-                                    Image(
-                                        bitmap = bitmap!!.asImageBitmap(),
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Fit,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth()) { page ->
+                                val path = selectedEvent!!.imagePaths[page]
+                                val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, key1 = path) {
+                                    value = withContext(Dispatchers.IO) {
+                                        com.example.eat.utils.ImageUtils.loadRotatedBitmap(path)
+                                    }
                                 }
                                 
-                                // Delete button (always visible)
-                                IconButton(
-                                    onClick = {
-                                        imagePathToDelete = path
-                                        showDeleteDialog = true
-                                    },
+                                Box(
                                     modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(20.dp)
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.7f))
-                                        .border(1.dp, Color.Black, CircleShape)
+                                        .fillMaxWidth()
+                                        .aspectRatio(3f / 4f)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(Color(0xFFF5F5F5))
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Delete",
-                                        tint = Color.Black,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-                        }
-                        if (selectedEvent!!.imagePaths.size > 1) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                repeat(selectedEvent!!.imagePaths.size) { iteration ->
-                                    val color = if (pagerState.currentPage == iteration) Color.DarkGray else Color.LightGray
-                                    Box(
+                                    androidx.compose.animation.AnimatedVisibility(
+                                        visible = bitmap != null,
+                                        enter = fadeIn(),
+                                        exit = fadeOut()
+                                    ) {
+                                        Image(
+                                            bitmap = bitmap!!.asImageBitmap(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                    
+                                    IconButton(
+                                        onClick = {
+                                            imagePathToDelete = path
+                                            showDeleteDialog = true
+                                        },
                                         modifier = Modifier
-                                            .padding(2.dp)
-                                            .clip(CircleShape)
-                                            .background(color)
-                                            .size(8.dp)
-                                    )
+                                            .align(Alignment.TopEnd)
+                                            .padding(12.dp)
+                                            .size(36.dp)
+                                            .background(Color.White.copy(alpha = 0.8f), CircleShape)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Delete Photo",
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            if (selectedEvent!!.imagePaths.size > 1) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.Center) {
+                                    repeat(selectedEvent!!.imagePaths.size) { iteration ->
+                                        val color = if (pagerState.currentPage == iteration) Color.Black else Color.LightGray
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(3.dp)
+                                                .size(6.dp)
+                                                .background(color, CircleShape)
+                                        )
+                                    }
                                 }
                             }
                         }
-                    } else {
-                        // For events without images, just show the latest timestamp
-                        Text("时间: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(selectedEvent!!.latestTimestamp))}")
-                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        val isMain = selectedEvent!!.type == "Main Meal"
+                        Button(
+                            onClick = {
+                                viewModel.updateEventCategory(selectedEvent!!.timestamps, if (isMain) "Snack" else "Main Meal")
+                                showEventDetail = false
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEEEEEE), contentColor = Color.Black),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(if (isMain) "转为零食" else "转为正餐")
+                        }
+                        
+                        Button(
+                            onClick = {
+                                showDeleteDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFEBEE), contentColor = Color(0xFFC62828)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("删除记录")
+                        }
                     }
                 }
             },
-            confirmButton = { }
+            confirmButton = {},
+            shape = RoundedCornerShape(28.dp),
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier.padding(16.dp)
         )
     }
 
-    // Delete Confirmation Dialog (Rendered last to appear on top)
+    // D. Delete Confirmation Dialog
     if (showDeleteDialog && selectedEvent != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("确认删除") },
+            title = { Text("确认删除", style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold)) },
             text = { Text("确定要删除这条记录吗？") },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
                         if (imagePathToDelete != null) {
                             viewModel.deleteEventByImagePath(imagePathToDelete!!)
@@ -750,107 +786,29 @@ fun ProfileContent(
                         imagePathToDelete = null
                         showDeleteDialog = false
                         showEventDetail = false
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
                 ) {
                     Text("删除")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
+                TextButton(
+                    onClick = { showDeleteDialog = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
+                ) {
                     Text("取消")
                 }
-            }
+            },
+            shape = RoundedCornerShape(24.dp)
         )
     }
 }
 
-@Composable
-private fun eventCard(
-    event: Event,
-    isMainMeal: Boolean,
-    circlesWidthDp: Dp,
-    circleDiameterDp: Dp,
-    overlapOffsetDp: Dp,
-    numItems: Int,
-    showEventDetail: () -> Unit
-) {
-    val date = java.util.Date(event.latestTimestamp)
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { showEventDetail() }
-            .background(Color(0xFFE0F7FA))
-            .padding(
-                start = if (isMainMeal) 8.dp else 0.dp,
-                end = if (isMainMeal) 0.dp else 8.dp,
-                top = 4.dp,
-                bottom = 4.dp
-            )
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (isMainMeal) {
-                val displayText = if (numItems >= 4) {
-                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
-                } else {
-                    "正餐 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
-                }
-                Text(
-                    text = displayText,
-                    style = TextStyle(fontSize = 14.sp, color = Color.Gray),
-                    modifier = Modifier.padding(end = 8.dp),
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-            Box(modifier = Modifier.size(width = circlesWidthDp, height = circleDiameterDp)) {
-                if (event.imagePaths.isNotEmpty()) {
-                    event.imagePaths.forEachIndexed { index, path ->
-                        val bitmap = remember(path) { com.example.eat.utils.ImageUtils.loadRotatedBitmap(path, 200) }
-                        if (bitmap != null) {
-                            Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Event Photo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(circleDiameterDp)
-                                    .offset(x = overlapOffsetDp * index)
-                                    .clip(CircleShape)
-                                    .border(1.dp, Color.White, CircleShape)
-                            )
-                        }
-                    }
-                } else {
-                    event.colorIndices.forEachIndexed { index, colorIndex ->
-                        val markerColor = when (colorIndex) {
-                            0 -> Color.Red
-                            1 -> Color.Yellow
-                            2 -> Color.Blue
-                            else -> Color.Red
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(circleDiameterDp)
-                                .offset(x = overlapOffsetDp * index)
-                                .background(markerColor, CircleShape)
-                                .border(1.dp, Color.White, CircleShape)
-                        )
-                    }
-                }
-            }
-            if (!isMainMeal) {
-                val displayText = if (numItems >= 4) {
-                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
-                } else {
-                    "零食 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)}"
-                }
-                Text(
-                    text = displayText,
-                    style = TextStyle(fontSize = 14.sp, color = Color.Gray),
-                    modifier = Modifier.padding(start = 8.dp),
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-        }
-    }
+// Helper function to check if Date is today
+private fun isToday(date: Date): Boolean {
+    val cal1 = Calendar.getInstance()
+    val cal2 = Calendar.getInstance().apply { time = date }
+    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+           cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
 }

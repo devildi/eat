@@ -30,6 +30,23 @@ class TedRepository {
         }
     }
 
+    suspend fun checkGoogleAccessibility(): Boolean = withContext(Dispatchers.IO) {
+        val checkClient = client.newBuilder()
+            .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val request = Request.Builder()
+            .url("https://www.google.com")
+            .build()
+        try {
+            checkClient.newCall(request).execute().use { response ->
+                response.isSuccessful || response.code in 200..399
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun fetchTranscript(url: String): Pair<List<TranscriptLine>, Long> = withContext(Dispatchers.IO) {
         if (url.isEmpty()) return@withContext Pair(emptyList(), 0L)
         try {

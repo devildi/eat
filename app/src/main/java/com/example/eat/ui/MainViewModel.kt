@@ -216,15 +216,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun parseArticle(url: String, onSuccess: (String, String) -> Unit, onError: (String) -> Unit) {
+    fun parseArticle(context: android.content.Context, url: String, onSuccess: (String, String) -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val doc = org.jsoup.Jsoup.connect(url)
-                    .userAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                    .timeout(10000)
-                    .get()
+                val isWeChat = url.contains("mp.weixin.qq.com") || url.contains("weixin.qq.com")
+                
+                if (isWeChat) {
+                    try {
+                        val (title, content) = parseWeChatArticleWithWebView(context, url)
+                        if (title.isNotEmpty() && content.isNotEmpty() && !content.contains("环境异常") && !title.contains("环境异常")) {
+                            withContext(Dispatchers.Main) {
+                                onSuccess(title, content)
+                            }
+                            return@launch
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        // Fallback to Jsoup if WebView fails
+                    }
+                }
 
-                var title = doc.title()
+                val userAgent = if (isWeChat) {
+                    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.42.2460"
+                } else {
+                    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                }
+
+                val connection = org.jsoup.Jsoup.connect(url)
+                    .userAgent(userAgent)
+                    .timeout(10000)
+                    .followRedirects(true)
+                
+                if (isWeChat) {
+                    connection.header("Referer", "https://mp.weixin.qq.com/")
+                    connection.header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                }
+
+                val doc = connection.get()
+
+                var title = ""
+                if (isWeChat) {
+                    title = doc.select("h1#activity-name").text().trim()
+                    if (title.isEmpty()) {
+                        title = doc.select(".rich_media_title").text().trim()
+                    }
+                }
+                if (title.isEmpty()) {
+                    title = doc.title()
+                }
                 if (title.isEmpty()) {
                     title = doc.select("h1").text()
                 }
@@ -233,10 +272,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 
                 // Content extraction strategy
-                // 1. Try generic "article" tag
-                // 2. Try common class names
-                // 3. Fallback to all paragraphs
-                var content = doc.select("div#js_content").text() // WeChat specific
+                // 1. Try WeChat specific js_content
+                // 2. Try generic "article" tag
+                // 3. Try common class names
+                // 4. Fallback to all paragraphs
+                var content = ""
+                if (isWeChat) {
+                    val jsContent = doc.select("div#js_content")
+                    content = jsContent.text()
+                }
+                
                 if (content.isEmpty()) {
                      content = doc.select("article").text()
                 }
@@ -250,6 +295,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     content = doc.body().text() // Ultimate fallback
                 }
 
+                if (isWeChat && content.isNotEmpty()) {
+                    val isPaid = doc.select(".js_pay_area, .pay_area, #js_pay_content, .pay_content").isNotEmpty()
+                    if (isPaid) {
+                        content = "[付费阅读文章，以下为免费预览内容]\n\n$content\n\n[提示：此文为付费文章。由于微信支付鉴权限制，付费后的全文无法在外部应用中直接获取，请在微信中复制全文后手动在此处粘贴保存。]"
+                    }
+                }
+
                 withContext(Dispatchers.Main) {
                     onSuccess(title, content)
                 }
@@ -261,6 +313,99 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    private suspend fun parseWeChatArticleWithWebView(context: android.content.Context, url: String): Pair<String, String> = withContext(Dispatchers.Main) {
+        val deferred = kotlinx.coroutines.CompletableDeferred<Pair<String, String>>()
+        val webView = android.webkit.WebView(context)
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.42.2460"
+        
+        // Timeout handler
+        val timeoutRunnable = Runnable {
+            if (!deferred.isCompleted) {
+                deferred.completeExceptionally(Exception("WebView timeout"))
+                try {
+                    webView.destroy()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+        webView.postDelayed(timeoutRunnable, 8000) // 8 seconds timeout
+        
+        webView.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
+                view?.evaluateJavascript(
+                    """
+                    (function() {
+                        var title = '';
+                        var titleEl = document.querySelector('h1#activity-name') || document.querySelector('.rich_media_title');
+                        if (titleEl) {
+                            title = titleEl.innerText.trim();
+                        } else {
+                            title = document.title;
+                        }
+                        
+                        var content = '';
+                        var contentEl = document.getElementById('js_content') || document.querySelector('.rich_media_content');
+                        if (contentEl) {
+                            content = contentEl.innerText.trim();
+                        }
+                        
+                        var isPaid = !!(document.querySelector('.js_pay_area') || document.querySelector('.pay_area') || document.getElementById('js_pay_content') || document.querySelector('.pay_content'));
+                        
+                        return JSON.stringify({ title: title, content: content, isPaid: isPaid });
+                    })()
+                    """.trimIndent()
+                ) { result ->
+                    try {
+                        val jsonStr = if (result != null && result.startsWith("\"") && result.endsWith("\"")) {
+                            result.substring(1, result.length - 1)
+                                .replace("\\\"", "\"")
+                                .replace("\\\\", "\\")
+                                .replace("\\n", "\n")
+                                .replace("\\t", "\t")
+                        } else {
+                            result ?: ""
+                        }
+                        
+                        val map = com.google.gson.Gson().fromJson(jsonStr, Map::class.java)
+                        val title = map["title"]?.toString() ?: ""
+                        var content = map["content"]?.toString() ?: ""
+                        val isPaid = map["isPaid"] as? Boolean ?: false
+                        
+                        if (isPaid && content.isNotEmpty()) {
+                            content = "[付费阅读文章，以下为免费预览内容]\n\n$content\n\n[提示：此文为付费文章。由于微信支付鉴权限制，付费后的全文无法在外部应用中直接获取，请在微信中复制全文后手动在此处粘贴保存。]"
+                        }
+                        
+                        if (title.isNotEmpty() && content.isNotEmpty() && !content.contains("环境异常") && !title.contains("环境异常")) {
+                            webView.removeCallbacks(timeoutRunnable)
+                            deferred.complete(Pair(title, content))
+                            webView.destroy()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+            
+            override fun onReceivedError(
+                view: android.webkit.WebView?,
+                request: android.webkit.WebResourceRequest?,
+                error: android.webkit.WebResourceError?
+            ) {
+                if (request?.isForMainFrame == true) {
+                    webView.removeCallbacks(timeoutRunnable)
+                    deferred.completeExceptionally(Exception("WebView error: ${error?.description}"))
+                    webView.destroy()
+                }
+            }
+        }
+        
+        webView.loadUrl(url)
+        deferred.await()
     }
 
     fun saveArticle(title: String, content: String, url: String) {
@@ -409,6 +554,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isCalibrated = kotlinx.coroutines.flow.MutableStateFlow(false)
     val isCalibrated: StateFlow<Boolean> = _isCalibrated.asStateFlow()
+
+    private val _isVpnConnected = kotlinx.coroutines.flow.MutableStateFlow<Boolean?>(null)
+    val isVpnConnected: StateFlow<Boolean?> = _isVpnConnected.asStateFlow()
+
+    private val _isCheckingVpn = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isCheckingVpn: StateFlow<Boolean> = _isCheckingVpn.asStateFlow()
+
+    fun checkGoogleAccessibility() {
+        viewModelScope.launch {
+            _isCheckingVpn.value = true
+            val success = tedRepository.checkGoogleAccessibility()
+            _isVpnConnected.value = success
+            _isCheckingVpn.value = false
+        }
+    }
+
+    fun clearListeningCache() {
+        viewModelScope.launch {
+            tedDao.deleteAllTalks()
+            _currentTedTalk.value = null
+            _isCalibrated.value = false
+            _hasTedFetchCompleted.value = true
+        }
+    }
 
     fun fetchRandomTedTalk() {
         viewModelScope.launch {

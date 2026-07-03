@@ -126,6 +126,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
     
     // Deletion State
     var articleToDelete by remember { mutableStateOf<com.example.eat.data.ArticleEntity?>(null) }
+    var showClearListeningCacheDialog by remember { mutableStateOf(false) }
     
     // Parsing & Editing State
     var isParsing by remember { mutableStateOf(false) }
@@ -243,6 +244,7 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                         showAddArticleDialog = false
                         isParsing = true
                         viewModel.parseArticle(
+                            context = context,
                             url = articleUrl,
                             onSuccess = { title, content ->
                                 isParsing = false
@@ -285,6 +287,28 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
             },
             dismissButton = {
                 TextButton(onClick = { articleToDelete = null }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    if (showClearListeningCacheDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showClearListeningCacheDialog = false },
+            title = { Text("清除缓存") },
+            text = { Text("确定要清除听力数据缓存吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearListeningCache()
+                    showClearListeningCacheDialog = false
+                    android.widget.Toast.makeText(context, "已清除听力缓存", android.widget.Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("确定", color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearListeningCacheDialog = false }) {
                     Text("取消")
                 }
             }
@@ -469,12 +493,16 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
                     }
                     Text(
                         text = titleText,
-                        modifier = if (selectedItem == 3) {
-                            Modifier.pointerInput(Unit) {
+                        modifier = when (selectedItem) {
+                            1 -> Modifier.pointerInput(Unit) {
+                                detectTapGestures(
+                                    onLongPress = { showClearListeningCacheDialog = true }
+                                )
+                            }
+                            3 -> Modifier.pointerInput(Unit) {
                                 detectTapGestures(onTap = { showDatePicker = true })
                             }
-                        } else {
-                            Modifier
+                            else -> Modifier
                         }
                     )
                 },
@@ -538,7 +566,25 @@ fun HomeScreen(viewModel: MainViewModel = viewModel()) {
         floatingActionButton = {
             if (selectedItem == 0) {
                 androidx.compose.material3.FloatingActionButton(
-                    onClick = { showAddArticleDialog = true },
+                    onClick = {
+                        try {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            if (clipboard.hasPrimaryClip()) {
+                                val clipData = clipboard.primaryClip
+                                if (clipData != null && clipData.itemCount > 0) {
+                                    val text = clipData.getItemAt(0).text?.toString() ?: ""
+                                    if (text.trim().startsWith("http://") || text.trim().startsWith("https://") || text.trim().contains("mp.weixin.qq.com")) {
+                                        articleUrl = text.trim()
+                                    } else {
+                                        articleUrl = ""
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                        showAddArticleDialog = true
+                    },
                     containerColor = Color.Black,
                     contentColor = Color.White
                 ) {
@@ -603,6 +649,23 @@ fun ListeningContent(viewModel: MainViewModel) {
     val hasTedFetchCompleted by viewModel.hasTedFetchCompleted.collectAsState()
     val isTedLoading by viewModel.isTedLoading.collectAsState()
     val isCalibrated by viewModel.isCalibrated.collectAsState()
+    val isVpnConnected by viewModel.isVpnConnected.collectAsState()
+    val isCheckingVpn by viewModel.isCheckingVpn.collectAsState()
+    var showVpnWarningDialog by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(isVpnConnected) {
+        if (isVpnConnected == false) {
+            showVpnWarningDialog = true
+        } else {
+            showVpnWarningDialog = false
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (isVpnConnected == null) {
+            viewModel.checkGoogleAccessibility()
+        }
+    }
     
     // Initial fetch if null
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -727,6 +790,26 @@ fun ListeningContent(viewModel: MainViewModel) {
         }
     }
 
+    if (showVpnWarningDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showVpnWarningDialog = false },
+            title = { Text("网络未就绪") },
+            text = { Text("检测到无法访问 Google，这可能会导致听力内容加载失败，建议您开启 VPN 之后重试。") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    viewModel.checkGoogleAccessibility()
+                }) {
+                    Text(if (isCheckingVpn) "检测中..." else "重新检测")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showVpnWarningDialog = false }) {
+                    Text("忽略并继续")
+                }
+            }
+        )
+    }
+
     // Show Loading if fetch hasn't completed yet
     if (!hasTedFetchCompleted) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -740,7 +823,12 @@ fun ListeningContent(viewModel: MainViewModel) {
          Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable { viewModel.fetchRandomTedTalk() },
+                .clickable { 
+                    if (isVpnConnected == false) {
+                        viewModel.checkGoogleAccessibility()
+                    }
+                    viewModel.fetchRandomTedTalk() 
+                },
             contentAlignment = Alignment.Center
          ) {
             Text("暂无内容 (点击刷新)", color = Color.Gray)
@@ -1001,56 +1089,138 @@ fun CameraContent(viewModel: MainViewModel) {
                     .fillMaxWidth()
                     .height(maxHeight - initialPreviewHeight)
             ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.Center)
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 1. 饮料
+                    Button(
+                        onClick = {
+                            viewModel.addEvent("饮料")
+                            android.widget.Toast.makeText(context, "已记录饮料", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .size(40.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        border = BorderStroke(1.dp, Color.Black)
+                    ) {
+                        Text("🥤", fontSize = 18.sp)
+                    }
 
+                    // 2. 冰棍
+                    Button(
+                        onClick = {
+                            viewModel.addEvent("冰棍")
+                            android.widget.Toast.makeText(context, "已记录冰棍", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .size(40.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        border = BorderStroke(1.dp, Color.Black)
+                    ) {
+                        Text("🍧", fontSize = 18.sp)
+                    }
 
+                    // 3. 拍照按钮
+                    Button(
+                        onClick = {
+                            if (!isTakingPhoto) {
+                                isTakingPhoto = true
+                                val photoFile = File(
+                                    context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
+                                    SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
+                                        .format(System.currentTimeMillis()) + ".jpg"
+                                )
 
-                Button(
-                    onClick = {
-                        if (!isTakingPhoto) {
-                            isTakingPhoto = true
-                            val photoFile = File(
-                                context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
-                                SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
-                                    .format(System.currentTimeMillis()) + ".jpg"
-                            )
+                                val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
-                            val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+                                imageCapture.takePicture(
+                                    outputOptions,
+                                    ContextCompat.getMainExecutor(context),
+                                    object : ImageCapture.OnImageSavedCallback {
+                                        override fun onError(exc: ImageCaptureException) {
+                                            android.util.Log.e("CameraContent", "Photo capture failed: ${exc.message}", exc)
+                                            isTakingPhoto = false
+                                        }
 
-                            imageCapture.takePicture(
-                                outputOptions,
-                                ContextCompat.getMainExecutor(context),
-                                object : ImageCapture.OnImageSavedCallback {
-                                    override fun onError(exc: ImageCaptureException) {
-                                        android.util.Log.e("CameraContent", "Photo capture failed: ${exc.message}", exc)
-                                        isTakingPhoto = false
+                                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                            capturedPhotoPath = photoFile.absolutePath
+                                            isPhotoCaptured = true
+                                            isTakingPhoto = false
+                                        }
                                     }
-
-                                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                                        capturedPhotoPath = photoFile.absolutePath
-                                        isPhotoCaptured = true
-                                        isTakingPhoto = false
-                                    }
-                                }
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .size(80.dp)
+                            .border(2.dp, Color.Black, CircleShape),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black
+                        ),
+                        border = BorderStroke(2.dp, Color.Black)
+                    ) {
+                        if (isTakingPhoto) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                color = Color.LightGray,
+                                strokeWidth = 3.dp
                             )
                         }
-                    },
-                    modifier = Modifier
-                        .size(80.dp)
-                        .align(Alignment.Center)
-                        .border(2.dp, Color.Black, CircleShape),
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black
-                    ),
-                    border = BorderStroke(2.dp, Color.Black)
-                ) {
-                    if (isTakingPhoto) {
-                        androidx.compose.material3.CircularProgressIndicator(
-                            modifier = Modifier.size(32.dp),
-                            color = Color.LightGray,
-                            strokeWidth = 3.dp
-                        )
+                    }
+
+                    // 4. 零食
+                    Button(
+                        onClick = {
+                            viewModel.addEvent("零食")
+                            android.widget.Toast.makeText(context, "已记录零食", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .size(40.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        border = BorderStroke(1.dp, Color.Black)
+                    ) {
+                        Text("🍪", fontSize = 18.sp)
+                    }
+
+                    // 5. 咖啡
+                    Button(
+                        onClick = {
+                            viewModel.addEvent("咖啡")
+                            android.widget.Toast.makeText(context, "已记录咖啡", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .size(40.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White,
+                            contentColor = Color.Black
+                        ),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        border = BorderStroke(1.dp, Color.Black)
+                    ) {
+                        Text("☕", fontSize = 18.sp)
                     }
                 }
             }
@@ -1237,3 +1407,4 @@ fun CameraContent(viewModel: MainViewModel) {
         }
     }
 }
+

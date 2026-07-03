@@ -390,7 +390,7 @@ fun ProfileContent(
                             }
                         }
                     } else {
-                        val sortedEvents = remember(currentEvents) { currentEvents.sortedBy { it.latestTimestamp } }
+                        val sortedEvents = remember(currentEvents) { currentEvents.sortedByDescending { it.latestTimestamp } }
                         
                         Column(
                             modifier = Modifier
@@ -403,13 +403,17 @@ fun ProfileContent(
                                 val date = Date(event.latestTimestamp)
                                 
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(androidx.compose.foundation.layout.IntrinsicSize.Min),
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
                                     // Left side: Timeline Line and Node
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.width(24.dp)
+                                        modifier = Modifier
+                                            .width(24.dp)
+                                            .fillMaxHeight()
                                     ) {
                                         Box(
                                             modifier = Modifier
@@ -420,13 +424,23 @@ fun ProfileContent(
                                         Box(
                                             modifier = Modifier
                                                 .size(12.dp)
-                                                .background(if (event.type == "Main Meal") Color(0xFFD84315) else Color(0xFFFF8F00), CircleShape)
+                                                .background(
+                                                    when (event.type) {
+                                                        "Main Meal" -> Color(0xFFD84315)
+                                                        "饮料" -> Color(0xFF00796B)
+                                                        "冰棍" -> Color(0xFF3F51B5)
+                                                        "零食" -> Color(0xFFE65100)
+                                                        "咖啡" -> Color(0xFF4E342E)
+                                                        else -> Color(0xFFFF8F00)
+                                                    },
+                                                    CircleShape
+                                                )
                                                 .border(2.dp, Color.White, CircleShape)
                                         )
                                         Box(
                                             modifier = Modifier
                                                 .width(2.dp)
-                                                .height(if (isLast) 32.dp else 100.dp) // Provide spacing
+                                                .weight(1f)
                                                 .background(if (isLast) Color.Transparent else Color(0xFFB0BEC5))
                                         )
                                     }
@@ -435,7 +449,7 @@ fun ProfileContent(
                                     Card(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .padding(bottom = 16.dp)
+                                            .padding(bottom = 8.dp)
                                             .clip(RoundedCornerShape(16.dp))
                                             .clickable { 
                                                 selectedEvent = event
@@ -457,12 +471,34 @@ fun ProfileContent(
                                                     Box(
                                                         modifier = Modifier
                                                             .clip(RoundedCornerShape(6.dp))
-                                                            .background(if (event.type == "Main Meal") Color(0xFFFBE9E7) else Color(0xFFFFF8E1))
+                                                            .background(
+                                                                when (event.type) {
+                                                                    "Main Meal" -> Color(0xFFFBE9E7)
+                                                                    "Snack" -> Color(0xFFFFF8E1)
+                                                                    "饮料" -> Color(0xFFE0F2F1)
+                                                                    "冰棍" -> Color(0xFFE8EAF6)
+                                                                    "零食" -> Color(0xFFFFF3E0)
+                                                                    "咖啡" -> Color(0xFFEFEBE9)
+                                                                    else -> Color(0xFFECEFF1)
+                                                                }
+                                                            )
                                                             .padding(horizontal = 8.dp, vertical = 4.dp)
                                                     ) {
                                                         Text(
-                                                            text = if (event.type == "Main Meal") "正餐" else "零食",
-                                                            color = if (event.type == "Main Meal") Color(0xFFD84315) else Color(0xFFFF8F00),
+                                                            text = when (event.type) {
+                                                                "Main Meal" -> "正餐"
+                                                                "Snack" -> "零食"
+                                                                else -> event.type
+                                                            },
+                                                            color = when (event.type) {
+                                                                "Main Meal" -> Color(0xFFD84315)
+                                                                "Snack" -> Color(0xFFFF8F00)
+                                                                "饮料" -> Color(0xFF00796B)
+                                                                "冰棍" -> Color(0xFF3F51B5)
+                                                                "零食" -> Color(0xFFE65100)
+                                                                "咖啡" -> Color(0xFF4E342E)
+                                                                else -> Color.Black
+                                                            },
                                                             style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                         )
                                                     }
@@ -473,9 +509,8 @@ fun ProfileContent(
                                                 }
                                             }
                                             
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                            
                                             if (event.imagePaths.isNotEmpty()) {
+                                                Spacer(modifier = Modifier.height(12.dp))
                                                 Row(
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                     modifier = Modifier.fillMaxWidth()
@@ -494,30 +529,6 @@ fun ProfileContent(
                                                             )
                                                         }
                                                     }
-                                                }
-                                            } else {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
-                                                    event.colorIndices.forEach { colorIndex ->
-                                                        val markerColor = when (colorIndex) {
-                                                            0 -> Color.Red
-                                                            1 -> Color.Yellow
-                                                            2 -> Color.Blue
-                                                            else -> Color.Red
-                                                        }
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(10.dp)
-                                                                .background(markerColor, CircleShape)
-                                                                .border(1.dp, Color.White, CircleShape)
-                                                        )
-                                                    }
-                                                    Text(
-                                                        text = "无图片记录",
-                                                        style = TextStyle(fontSize = 12.sp, color = Color.LightGray)
-                                                    )
                                                 }
                                             }
                                         }
@@ -645,7 +656,11 @@ fun ProfileContent(
                     ) {
                         Column {
                             Text(
-                                text = if (selectedEvent!!.type == "Main Meal") "正餐记录" else "零食记录",
+                                text = when (selectedEvent!!.type) {
+                                    "Main Meal" -> "正餐记录"
+                                    "Snack" -> "零食记录"
+                                    else -> "${selectedEvent!!.type}记录"
+                                },
                                 style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                             )
                             Text(
@@ -751,7 +766,8 @@ fun ProfileContent(
                         
                         Button(
                             onClick = {
-                                showDeleteDialog = true
+                                viewModel.deleteEvent(selectedEvent!!)
+                                showEventDetail = false
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFEBEE), contentColor = Color(0xFFC62828)),
